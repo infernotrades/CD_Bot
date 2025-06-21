@@ -16,7 +16,7 @@ STRAINS = [
         "breeder": "Clearwater Genetics",
         "breeder_url": "https://www.instagram.com/clearwatergenetics",
         "image_url": "https://i.imgur.com/oI9nOs9.png",
-        "notes": "Breeder cut. Noted for candy-like sweet aroma."
+        "notes": "Clones Direct Cut. Noted for candy-like sweet aroma."
     },
     {
         "name": "Sherb Cake",
@@ -24,7 +24,7 @@ STRAINS = [
         "breeder": "Seed Junky Genetics",
         "breeder_url": "https://www.seedjunkygenetics.com",
         "image_url": "https://iili.io/3qJ78Fe.jpg",
-        "notes": "Breeder cut. Gassy, creamy aroma with berry undertones."
+        "notes": "Gassy, creamy aroma with berry undertones."
     },
     {
         "name": "Blumosa",
@@ -32,21 +32,21 @@ STRAINS = [
         "breeder": "Mosca",
         "breeder_url": "https://www.moscaseeds.com",
         "image_url": "https://iili.io/3qJuWXt.jpg",
-        "notes": "Breeder cut. Mosca Seeds hybrid with citrus blue Powerade-like aroma."
+        "notes": "Mosca Seeds hybrid with citrus blue Powerade-like aroma."
     },
     {
         "name": "Blue Dream",
         "lineage": "Blueberry x Haze",
         "breeder": "Unknown",
         "image_url": "https://iili.io/3q3U4BR.png",
-        "notes": "Santa Cruz cut (original Blue Dream clone)."
+        "notes": "Santa Cruz cut."
     },
     {
         "name": "Bubba Kush",
         "lineage": "OG Kush x Unknown (Pre-98)",
         "breeder": "Unknown",
         "image_url": "https://iili.io/3q3gm91.jpg",
-        "notes": "Pre-98 cut (classic Bubba Kush)."
+        "notes": "Pre-98 cut."
     },
     {
         "name": "Bubblegum Cookies",
@@ -85,7 +85,7 @@ STRAINS = [
         "lineage": "Gelato x Wedding Cake",
         "breeder": "Unknown",
         "image_url": "https://iili.io/3q3igQn.jpg",
-        "notes": "Popular hybrid (clone-only, multiple origins)."
+        "notes": ""
     },
     {
         "name": "Georgia Pie",
@@ -93,7 +93,7 @@ STRAINS = [
         "breeder": "Seed Junky Genetics",
         "breeder_url": "https://www.seedjunkygenetics.com",
         "image_url": "https://i.imgur.com/Rc9ossa.png",
-        "notes": "Sourced from Archive Portland (official Georgia Pie cut)."
+        "notes": "Sourced from Archive Portland."
     },
     {
         "name": "GG4",
@@ -125,7 +125,7 @@ STRAINS = [
         "breeder": "Seed Junky Genetics",
         "breeder_url": "https://www.seedjunkygenetics.com",
         "image_url": "https://iili.io/3qFq1I9.jpg",
-        "notes": "Reign City cut (clone selected by @reigncity_)."
+        "notes": "Reign City cut."
     },
     {
         "name": "Pineapple Haze",
@@ -133,7 +133,7 @@ STRAINS = [
         "breeder": "Barney's Farm",
         "breeder_url": "https://www.barneysfarm.com",
         "image_url": "https://i.imgur.com/soQWRBo.jpeg",
-        "notes": ""
+        "notes": "Clones Direct cut"
     },
     {
         "name": "Platinum Garlic",
@@ -141,7 +141,7 @@ STRAINS = [
         "breeder": "InHouse",
         "breeder_url": "https://www.instagram.com/inhouse_genetics_official",
         "image_url": "https://i.imgur.com/OBuiFf8.png",
-        "notes": ""
+        "notes": "Turns blue and smells super strong!"
     },
     {
         "name": "Rainbow Sherbet #11",
@@ -149,7 +149,7 @@ STRAINS = [
         "breeder": "Deo Farms",
         "breeder_url": "https://www.instagram.com/deo_farms",
         "image_url": "https://i.imgur.com/cCTOdIW.png",
-        "notes": "Phenotype #11 (RS-11, selected by Wizard Trees/Deo)."
+        "notes": "Phenotype #11 selected by Wizard Trees/Deo."
     },
     {
         "name": "Redline Haze",
