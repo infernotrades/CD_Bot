@@ -1,4 +1,6 @@
+import os
 import logging
+from telegram import Update
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -6,18 +8,19 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
-from telegram import Update
 from handlers import (
     start_command,
     handle_callback_query,
     handle_text,
 )
 
-import os
+# Get environment variables
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+PORT = int(os.getenv("PORT", 8080))
 
-if not BOT_TOKEN:
-    raise ValueError("BOT_TOKEN not found. Set it with `flyctl secrets set BOT_TOKEN=...`")
+if not BOT_TOKEN or not WEBHOOK_URL:
+    raise ValueError("BOT_TOKEN or WEBHOOK_URL not set!")
 
 # Logging
 logging.basicConfig(
@@ -37,8 +40,14 @@ def main():
 
     app.add_error_handler(error_handler)
 
-    print("✅ Bot is running...")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    print("🌱 Bot is running on webhook...")
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path=BOT_TOKEN,
+        webhook_url=f"{WEBHOOK_URL}/{BOT_TOKEN}",
+        allowed_updates=Update.ALL_TYPES
+    )
 
 if __name__ == "__main__":
     main()
