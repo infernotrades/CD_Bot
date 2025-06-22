@@ -8,28 +8,24 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
-from handlers import (
-    start_command,
-    handle_callback_query,
-    handle_text,
-)
+from handlers.base import start_command, handle_text
+from handlers.cart import handle_callback_query
 
-# Get environment variables
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 PORT = int(os.getenv("PORT", 8080))
 
-if not BOT_TOKEN or not WEBHOOK_URL:
-    raise ValueError("BOT_TOKEN or WEBHOOK_URL not set!")
+if not BOT_TOKEN:
+    raise RuntimeError("BOT_TOKEN is missing. Set the BOT_TOKEN environment variable.")
 
-# Logging
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-async def error_handler(update: object, context: Exception):
-    logger.error(msg="Exception while handling an update:", exc_info=context)
+async def error_handler(update: object, context):
+    logger.error("Error handling update:", exc_info=context.error)
 
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
@@ -37,17 +33,22 @@ def main():
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CallbackQueryHandler(handle_callback_query))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-
     app.add_error_handler(error_handler)
 
-    print("🌱 Bot is running on webhook...")
-    app.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        url_path=BOT_TOKEN,
-        webhook_url=f"{WEBHOOK_URL}/{BOT_TOKEN}",
-        allowed_updates=Update.ALL_TYPES
-    )
+    print("✅ Bot is running...")
+
+    if WEBHOOK_URL:
+        # Run in webhook mode (Fly.io provides a public domain/SSL)
+        app.run_webhook(
+            listen="0.0.0.0",
+            port=PORT,
+            url_path=BOT_TOKEN,
+            webhook_url=f"{WEBHOOK_URL}/{BOT_TOKEN}",
+            allowed_updates=Update.ALL_TYPES,
+        )
+    else:
+        # Fall back to long polling
+        app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
     main()
