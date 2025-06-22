@@ -55,14 +55,12 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def get_strain_buttons():
     buttons = []
-    row = []
-    for i, s in enumerate(STRAINS):
-        label = f"{s.get('emoji', '🌱')} {s['name']}"
-        row.append(InlineKeyboardButton(label, callback_data=f"strain_{s['name']}"))
-        if len(row) == 2:
-            buttons.append(row)
-            row = []
-    if row:
+    for i in range(0, len(STRAINS), 2):
+        row = []
+        for j in range(2):
+            if i + j < len(STRAINS):
+                s = STRAINS[i + j]
+                row.append(InlineKeyboardButton(s["name"], callback_data=f"strain_{s['name']}"))
         buttons.append(row)
     return buttons
 
