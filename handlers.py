@@ -54,7 +54,16 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 def get_strain_buttons():
-    return [[InlineKeyboardButton(s["name"], callback_data=f"strain_{s['name']}")] for s in STRAINS]
+    buttons = []
+    row = []
+    for i, s in enumerate(STRAINS):
+        row.append(InlineKeyboardButton(s["name"], callback_data=f"strain_{s['name']}"))
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    return buttons
 
 async def send_strain_details(update: Update, context: ContextTypes.DEFAULT_TYPE, strain_name: str):
     user_id = update.effective_user.id
