@@ -57,7 +57,8 @@ def get_strain_buttons():
     buttons = []
     row = []
     for i, s in enumerate(STRAINS):
-        row.append(InlineKeyboardButton(s["name"], callback_data=f"strain_{s['name']}"))
+        label = f"{s.get('emoji', '🌱')} {s['name']}"
+        row.append(InlineKeyboardButton(label, callback_data=f"strain_{s['name']}"))
         if len(row) == 2:
             buttons.append(row)
             row = []
