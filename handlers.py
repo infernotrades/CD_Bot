@@ -139,6 +139,11 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     if user_id not in CART:
         CART[user_id] = {"items": []}
 
+elif data.startswith("strain_"):
+        strain_name = data.split("strain_")[1]
+        await send_strain_details(update, context, strain_name)
+        return
+
     if data == "view_strains":
         await query.message.reply_text("📋 Select a strain to view details:",
             reply_markup=InlineKeyboardMarkup(get_strain_buttons()))
