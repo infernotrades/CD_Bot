@@ -38,7 +38,7 @@ def main():
     app.add_error_handler(error_handler)
 
     print("✅ Bot is running...")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)  # ✅ No listen/port args here
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
     main()
