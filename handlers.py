@@ -12,7 +12,7 @@ CART = {}
 FAQ_TEXT = """
 <b>Frequently Asked Questions</b>
 
-• Orders ship within 14 days of payment unless stated.
+• Orders ship within 14 days of payment unless otherwise stated.
 • Worldwide shipping.
 • Strains sourced from breeders, seed hunts, or trusted nurseries.
 • 7-day satisfaction guarantee.
@@ -53,7 +53,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("❓ FAQ", callback_data="faq")]
     ]
     await update.message.reply_text(
-        "Welcome to CloneDirect 🌱\n\nExplore premium genetics and build your order now.",
+        "Welcome to Clones Direct 🌱\n\nExplore premium genetics and build your order now.",
         reply_markup=InlineKeyboardMarkup(buttons),
     )
 
