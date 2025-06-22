@@ -53,9 +53,10 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("❓ FAQ", callback_data="faq")]
     ]
     await update.message.reply_text(
-        "Welcome! 👋\n\nBrowse elite clones and build your custom order below.",
+        "Welcome to CloneDirect 🌱\n\nExplore premium genetics and build your order now.",
         reply_markup=InlineKeyboardMarkup(buttons),
     )
+
 def get_strain_buttons():
     buttons = []
     for strain in STRAINS:
@@ -86,6 +87,7 @@ async def handle_add_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.callback_query.message.reply_text(
         "How many clones would you like to add?\n\n" + PRICING_TEXT
     )
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text.strip().lower()
@@ -93,7 +95,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id not in CART:
         CART[user_id] = {"items": []}
 
-    # Handle shortcuts
+    # Handle smart keyword triggers
     keywords = {
         "clones": "view_strains",
         "strains": "view_strains",
@@ -126,6 +128,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("🔙 Back to Menu", callback_data="view_strains")]
             ])
         )
+
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -147,23 +150,26 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             return
 
         cart_summary = ""
-        for item in CART[user_id]["items"]:
-            cart_summary += f"{item['quantity']}x {item['strain']}\n"
+        for i, item in enumerate(CART[user_id]["items"]):
+            cart_summary += f"{i+1}. {item['quantity']}x {item['strain']}\n"
 
         buttons = [
             [InlineKeyboardButton("✅ Finalize Order", callback_data="finalize_order")],
             [InlineKeyboardButton("🔙 Back to Menu", callback_data="view_strains")]
         ]
         await query.message.reply_text(f"🛒 <b>Your Cart</b>\n\n{cart_summary}", parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(buttons))
+
     elif data == "finalize_order":
         await query.message.reply_text("💳 Select payment method:", reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("Crypto (BTC/ETH/SOL/USDC)", callback_data="crypto")],
             [InlineKeyboardButton("PayPal (+5% Fee)", callback_data="paypal")]
         ]))
+
     elif data == "crypto":
         await query.message.reply_text("Please reply with your preferred crypto (e.g., SOL, USDT, etc.)")
+
     elif data == "paypal":
-        await query.message.reply_text("PayPal selected. You'll receive the invoice shortly.")
+        await update.callback_query.message.reply_text("PayPal selected. You'll receive the invoice shortly.")
 
     elif data == "add_quantity":
         await handle_add_quantity(update, context)
