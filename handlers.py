@@ -8,7 +8,7 @@ from telegram.constants import ParseMode
 with open("strains.json", "r") as f:
     STRAINS = json.load(f)
 
-# Simple in-memory cart
+# In-memory cart and state
 CART = {}
 
 # FAQ and pricing (plain text)
@@ -41,7 +41,7 @@ def calculate_price(items, country, payment_method):
     clone_price = 60 if total_clones >= 3 else 80
     base_total = total_clones * clone_price
     shipping = 100 if country.lower() != "usa" else 40
-    fee = 0.05 * (base_total + shipping) if payment_method == "paypal" else 0
+    fee = 0.05 * (base_total + shipping) if payment_method == "PayPal" else 0
     return base_total + shipping + fee
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -64,9 +64,7 @@ def get_strain_buttons():
         for j in range(2):
             if i + j < len(STRAINS):
                 s = STRAINS[i + j]
-                row.append(
-                    InlineKeyboardButton(s["name"], callback_data=f"strain_{s['name']}")
-                )
+                row.append(InlineKeyboardButton(s["name"], callback_data=f"strain_{s['name']}"))
         buttons.append(row)
     return buttons
 
@@ -78,7 +76,6 @@ async def send_strain_details(update: Update, context: ContextTypes.DEFAULT_TYPE
     user_id = update.effective_user.id
     CART[user_id]["last_strain"] = strain_name
 
-    # Build a Markdown caption with full details
     caption = (
         f"*{strain['name']}*\n"
         f"_Genetics:_ {strain['lineage']}\n"
@@ -88,7 +85,6 @@ async def send_strain_details(update: Update, context: ContextTypes.DEFAULT_TYPE
     if strain.get("breeder_url"):
         caption += f"\n\n[Breeder Info]({strain['breeder_url']})"
 
-    # Two-button row: Add to Cart + Back to Menu
     buttons = [
         [
             InlineKeyboardButton("➕ Add to Cart", callback_data="add_quantity"),
@@ -110,11 +106,32 @@ async def handle_add_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    text = update.message.text.strip().lower()
+    text = update.message.text.strip()
+
+    # If waiting for Instagram handle after payment method
+    if user_id in CART and CART[user_id].get('payment_method') and 'ig_handle' not in CART[user_id]:
+        CART[user_id]['ig_handle'] = text
+        # Confirm to user
+        await update.message.reply_text("Thanks! We'll be in contact shortly.")
+        # Build order info
+        items = CART[user_id]['items']
+        order_lines = [f"- {it['quantity']}x {it['strain']}" for it in items]
+        order_info = (
+            f"New order from IG {text}:\n"
+            f"Payment Method: {CART[user_id]['payment_method']}\n"
+            f"Items:\n" + "\n".join(order_lines)
+        )
+        # Send DM to clones_direct
+        await context.bot.send_message(chat_id="@clones_direct", text=order_info)
+        # Clear cart
+        del CART[user_id]
+        return
+
+    # Regular triggers
     if user_id not in CART:
         CART[user_id] = {"items": []}
 
-    # Smart triggers
+    # Keywords for main menu
     keywords = {
         "clones": "view_strains",
         "strains": "view_strains",
@@ -123,17 +140,17 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "faq": "faq"
     }
     for key, action in keywords.items():
-        if key in text:
+        if key in text.lower():
             await handle_callback_query_from_text(update, action)
             return
 
     # Quantity entry
-    if "last_strain" in CART[user_id]:
-        try:
-            qty = int(re.findall(r"\d+", text)[0])
-        except (IndexError, ValueError):
+    if 'last_strain' in CART[user_id]:
+        match = re.findall(r"\d+", text)
+        if not match:
             await update.message.reply_text("Please enter a valid number.")
             return
+        qty = int(match[0])
         CART[user_id]["items"].append({
             "strain": CART[user_id]["last_strain"],
             "quantity": qty
@@ -156,31 +173,28 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     if user_id not in CART:
         CART[user_id] = {"items": []}
 
-    # Strain selection
+    # Strain detail
     if data.startswith("strain_"):
         strain_name = data.split("strain_", 1)[1]
         await send_strain_details(update, context, strain_name)
         return
 
-    # Main menu flows
+    # View strains
     if data == "view_strains":
         await query.message.reply_text(
             "📋 Select a strain to view details:",
             reply_markup=InlineKeyboardMarkup(get_strain_buttons())
         )
-
+    # FAQ
     elif data == "faq":
         await query.message.reply_text(FAQ_TEXT)
-
+    # View cart
     elif data == "view_cart":
         items = CART[user_id]["items"]
         if not items:
             await query.message.reply_text("🛒 Your cart is empty.")
             return
-        cart_summary = "\n".join(
-            f"{i+1}. {item['quantity']}x {item['strain']}"
-            for i, item in enumerate(items)
-        )
+        cart_summary = "\n".join(f"{i+1}. {it['quantity']}x {it['strain']}" for i, it in enumerate(items))
         await query.message.reply_text(
             f"🛒 *Your Cart*\n\n{cart_summary}",
             parse_mode=ParseMode.MARKDOWN,
@@ -189,56 +203,26 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 [InlineKeyboardButton("🔙 Back to Menu", callback_data="view_strains")]
             ])
         )
-
-    # Payment selection
+    # Finalize → ask payment method
     elif data == "finalize_order":
         await query.message.reply_text(
             "💳 Select payment method:",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("💰 Crypto", callback_data="crypto")],
-                [InlineKeyboardButton("💳 PayPal (+5% Fee)", callback_data="paypal")],
+                [InlineKeyboardButton("💳 PayPal", callback_data="paypal")],
                 [InlineKeyboardButton("✉️ Mail In", callback_data="mail_in")],
             ])
         )
-
-    elif data == "crypto":
-        await query.message.reply_text(
-            "Select your crypto:",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Bitcoin (BTC)", callback_data="coin_BTC")],
-                [InlineKeyboardButton("Ethereum (ETH)", callback_data="coin_ETH")],
-                [InlineKeyboardButton("Solana (SOL)", callback_data="coin_SOL")],
-                [InlineKeyboardButton("USDC", callback_data="coin_USDC")],
-                [InlineKeyboardButton("USDT", callback_data="coin_USDT")],
-                [InlineKeyboardButton("Other", callback_data="coin_OTHER")],
-            ])
-        )
-
-    elif data.startswith("coin_"):
-        coin = data.split("coin_", 1)[1]
-        if coin == "OTHER":
-            await query.message.reply_text("Please type your preferred crypto:")
-        else:
-            await query.message.reply_text(
-                f"You chose *{coin}*. Please send payment to our {coin} address: `YOUR_{coin}_ADDRESS_HERE`",
-                parse_mode=ParseMode.MARKDOWN
-            )
-
-    elif data == "paypal":
-        await query.message.reply_text("PayPal selected. You’ll receive an invoice shortly.")
-
-    elif data == "mail_in":
-        await query.message.reply_text(
-            "Mail-In selected. Please send a check or money order to:\n\n"
-            "Clones Direct\n123 Greenway Blvd\nGrowtown, CA 90000"
-        )
-
-    # Quantity flow
+    # Payment chosen → ask IG handle
+    elif data in ("crypto", "paypal", "mail_in"):
+        method = "Crypto" if data == "crypto" else "PayPal" if data == "paypal" else "Mail In"
+        CART[user_id]['payment_method'] = method
+        await query.message.reply_text("Please enter your Instagram handle (e.g., @username)")
+    # Add quantity
     elif data == "add_quantity":
         await handle_add_quantity(update, context)
 
 async def handle_callback_query_from_text(update, data):
-    # Convert text commands into callback flow
     class DummyCallbackQuery:
         def __init__(self, update, data):
             self.message = update.message
