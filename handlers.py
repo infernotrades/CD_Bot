@@ -9,7 +9,7 @@ with open("strains.json", "r") as f:
 
 CART = {}
 FAQ_TEXT = """
-<b>Frequently Asked Questions</b>
+Frequently Asked Questions
 
 • Orders ship within 14 days of payment unless otherwise stated.
 • Worldwide shipping.
@@ -20,15 +20,15 @@ FAQ_TEXT = """
 """
 
 PRICING_TEXT = """
-<b>Pricing:</b>
+Pricing:
 • 1–2 clones: $80 each
 • 3+ clones: $60 each
 
-<b>Shipping:</b>
+Shipping:
 • USA: $40 (1–2 days)
 • International: $100 (3–5 days)
 
-<b>PayPal Fee:</b>
+PayPal Fee:
 • +5% (applies to total including shipping)
 """
 
