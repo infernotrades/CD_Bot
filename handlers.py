@@ -113,7 +113,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         CART[user_id]['ig_handle'] = text
         # Long confirmation message
         await update.message.reply_text(
-            "👍 Thanks! I’ve sent your order for processing. We’ll reach out on Instagram or here shortly."
+            "👍 Thanks! I’ve sent your order for processing. We’ll reach out shortly."
         )
         # Build order info
         items = CART[user_id]['items']
@@ -123,8 +123,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Payment Method: {CART[user_id]['payment_method']}\n"
             f"Items:\n" + "\n".join(order_lines)
         )
-        # Send DM only to @Clones_Direct (admins)
-        await context.bot.send_message(chat_id="@Clones_Direct", text=order_info)
+        # Send DM only to @clones_direct (admins)
+        await context.bot.send_message(chat_id="@clones_direct", text=order_info)
         # Clear cart
         del CART[user_id]
         return
