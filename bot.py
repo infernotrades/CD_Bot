@@ -8,8 +8,7 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
-from handlers.base import start_command, handle_text
-from handlers.cart import handle_callback_query
+from handlers import start_command, handle_text, handle_callback_query
 
 # Get your bot token from environment
 BOT_TOKEN = os.getenv("BOT_TOKEN")
