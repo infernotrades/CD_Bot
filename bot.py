@@ -1,3 +1,5 @@
+# bot.py
+
 import os
 import logging
 import threading
@@ -12,7 +14,6 @@ def _serve_healthcheck():
     server = HTTPServer(("", port), SimpleHTTPRequestHandler)
     server.serve_forever()
 
-# run in background so your bot logic still runs
 threading.Thread(target=_serve_healthcheck, daemon=True).start()
 #––– END fly.io healthcheck shim ––––––––––––––––––––––––––––––––
 
