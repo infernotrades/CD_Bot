@@ -1,3 +1,5 @@
+# handlers.py
+
 import os
 import json
 import re
@@ -15,6 +17,12 @@ ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID", "@clones_direct")
 # Load strain data
 with open("strains.json", "r") as f:
     STRAINS = json.load(f)
+
+# Generate slug->strain lookup
+def slugify(name: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_]+", "_", name.replace(" ", "_"))
+
+SLUG_MAP = { slugify(s["name"]): s for s in STRAINS }
 
 # In-memory cart storage
 CART = {}
@@ -45,7 +53,7 @@ PayPal Fee:
 """
 
 def calculate_price(items, country, payment_method):
-    total_clones = sum(item['quantity'] for item in items)
+    total_clones = sum(item["quantity"] for item in items)
     clone_price = 60 if total_clones >= 3 else 80
     base_total = total_clones * clone_price
     shipping = 100 if country.lower() != "usa" else 40
@@ -54,20 +62,16 @@ def calculate_price(items, country, payment_method):
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    CART[user_id] = {"items": []}
+    CART[user_id] = { "items": [] }
     buttons = [
-        [InlineKeyboardButton("📋 View Strains", callback_data="view_strains")],
-        [InlineKeyboardButton("🛒 View Cart", callback_data="view_cart")],
-        [InlineKeyboardButton("❓ FAQ", callback_data="faq")]
+        [ InlineKeyboardButton("📋 View Strains", callback_data="view_strains") ],
+        [ InlineKeyboardButton("🛒 View Cart",    callback_data="view_cart")    ],
+        [ InlineKeyboardButton("❓ FAQ",          callback_data="faq")          ]
     ]
     await update.message.reply_text(
         "Welcome to Clone Direct! 🌱👋 Browse elite clones and build your custom order below.",
         reply_markup=InlineKeyboardMarkup(buttons)
     )
-
-def slugify(name: str) -> str:
-    # Replace spaces and special chars for callback_data
-    return re.sub(r"[^a-zA-Z0-9_]+", "_", name.replace(' ', '_'))
 
 def get_strain_buttons():
     buttons = []
@@ -76,15 +80,13 @@ def get_strain_buttons():
         for j in range(2):
             if i + j < len(STRAINS):
                 s = STRAINS[i + j]
-                slug = slugify(s['name'])
-                row.append(InlineKeyboardButton(s["name"], callback_data=f"strain_{slug}"))
+                slug = slugify(s["name"])
+                row.append( InlineKeyboardButton(s["name"], callback_data=f"strain_{slug}") )
         buttons.append(row)
     return buttons
 
 async def send_strain_details(update: Update, context: ContextTypes.DEFAULT_TYPE, slug: str):
-    # Convert slug back to name
-    name = slug.replace('_', ' ')
-    strain = next((s for s in STRAINS if s["name"] == name), None)
+    strain = SLUG_MAP.get(slug)
     if not strain:
         logger.error(f"Strain not found for slug: {slug}")
         return
@@ -123,27 +125,29 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
 
     # Processing 'other' crypto input
-    if user_id in CART and CART[user_id].get('awaiting_crypto_other'):
-        CART[user_id]['payment_method'] = text
-        del CART[user_id]['awaiting_crypto_other']
+    if user_id in CART and CART[user_id].get("awaiting_crypto_other"):
+        CART[user_id]["payment_method"] = text
+        del CART[user_id]["awaiting_crypto_other"]
         await update.message.reply_text("Please enter your Instagram handle (e.g., @username)")
         return
 
     # Awaiting IG handle
-    if user_id in CART and CART[user_id].get('payment_method') and 'ig_handle' not in CART[user_id]:
-        CART[user_id]['ig_handle'] = text
-        await update.message.reply_text(
-            "👍 Thanks! I’ve sent your order for processing. We’ll reach out shortly."
-        )
-        items = CART[user_id]['items']
+    if user_id in CART and CART[user_id].get("payment_method") and "ig_handle" not in CART[user_id]:
+        CART[user_id]["ig_handle"] = text
+        await update.message.reply_text("👍 Thanks! I’ve sent your order for processing. We’ll reach out shortly.")
+        items = CART[user_id]["items"]
+        user = update.effective_user
+        username = f"@{user.username}" if user.username else f"{user.first_name} {user.last_name or ''}"
         order_lines = [f"- {it['strain']} x{it['quantity']}" for it in items]
         order_info = (
-            f"📦 New order from IG {text}:\n"
+            f"📦 New order\n"
+            f"Telegram: {username}\n"
+            f"Instagram: {text}\n"
             f"Payment Method: {CART[user_id]['payment_method']}\n"
             f"Items:\n" + "\n".join(order_lines)
         )
         chat_id = ADMIN_CHAT_ID
-        if chat_id.lstrip('-').isdigit():
+        if chat_id.lstrip("-").isdigit():
             chat_id = int(chat_id)
         try:
             await context.bot.send_message(chat_id=chat_id, text=order_info)
@@ -154,28 +158,34 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if user_id not in CART:
-        CART[user_id] = {"items": []}
+        CART[user_id] = { "items": [] }
 
     # Main menu triggers
-    for key, action in {"clones":"view_strains","strains":"view_strains","menu":"view_strains","how much":"faq","faq":"faq"}.items():
+    for key, action in {
+        "clones":"view_strains",
+        "strains":"view_strains",
+        "menu":"view_strains",
+        "how much":"faq",
+        "faq":"faq"
+    }.items():
         if key in text.lower():
             await handle_callback_query_from_text(update, action)
             return
 
     # Quantity input
-    if 'last_strain' in CART[user_id]:
+    if "last_strain" in CART[user_id]:
         nums = re.findall(r"\d+", text)
         if not nums:
             await update.message.reply_text("Please enter a valid number.")
             return
         qty = int(nums[0])
-        CART[user_id]['items'].append({'strain': CART[user_id]['last_strain'], 'quantity': qty})
-        del CART[user_id]['last_strain']
+        CART[user_id]["items"].append({ "strain": CART[user_id]["last_strain"], "quantity": qty })
+        del CART[user_id]["last_strain"]
         await update.message.reply_text(
             f"✅ Added {CART[user_id]['items'][-1]['strain']} x{qty} to your cart.",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🛒 View Cart", callback_data="view_cart")],
-                [InlineKeyboardButton("🔙 Back to Menu", callback_data="view_strains")]
+                [ InlineKeyboardButton("🛒 View Cart", callback_data="view_cart") ],
+                [ InlineKeyboardButton("🔙 Back to Menu", callback_data="view_strains") ]
             ])
         )
 
@@ -187,10 +197,10 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     logger.info(f"Callback data received: {data}")
 
     if user_id not in CART:
-        CART[user_id] = {"items": []}
+        CART[user_id] = { "items": [] }
 
     if data.startswith("strain_"):
-        slug = data.split("strain_", 1)[1]
+        slug = data.split("strain_",1)[1]
         await send_strain_details(update, context, slug)
         return
 
@@ -206,51 +216,54 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         if not items:
             await query.message.reply_text("🛒 Your cart is empty.")
             return
-        summary = "\n".join(f"{i+1}. {it['strain']} x{it['quantity']}" for i, it in enumerate(items))
+        summary = "\n".join(f"{i+1}. {it['strain']} x{it['quantity']}" for i,it in enumerate(items))
         await query.message.reply_text(
             f"🛒 *Your Cart*\n\n{summary}",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ Finalize Order", callback_data="finalize_order")],
-                [InlineKeyboardButton("🔙 Back to Menu", callback_data="view_strains")]
+                [ InlineKeyboardButton("✅ Finalize Order", callback_data="finalize_order") ],
+                [ InlineKeyboardButton("🔙 Back to Menu",   callback_data="view_strains")   ]
             ])
         )
     elif data == "finalize_order":
         await query.message.reply_text(
             "💳 Select payment method:",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("💰 Crypto", callback_data="crypto")],
-                [InlineKeyboardButton("💳 PayPal", callback_data="paypal")],
-                [InlineKeyboardButton("✉️ Mail In", callback_data="mail_in")]
+                [ InlineKeyboardButton("💰 Crypto", callback_data="crypto") ],
+                [ InlineKeyboardButton("💳 PayPal", callback_data="paypal") ],
+                [ InlineKeyboardButton("✉️ Mail In", callback_data="mail_in") ]
             ])
         )
     elif data == "crypto":
         await query.message.reply_text(
             "Select crypto:",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Bitcoin (BTC)", callback_data="pay_btc")],
-                [InlineKeyboardButton("Ethereum (ETH)", callback_data="pay_eth")],
-                [InlineKeyboardButton("Solana (SOL)", callback_data="pay_sol")],
-                [InlineKeyboardButton("USDC", callback_data="pay_usdc")],
-                [InlineKeyboardButton("USDT", callback_data="pay_usdt")],
-                [InlineKeyboardButton("Other", callback_data="crypto_other")]
+                [ InlineKeyboardButton("Bitcoin (BTC)", callback_data="pay_btc") ],
+                [ InlineKeyboardButton("Ethereum (ETH)", callback_data="pay_eth") ],
+                [ InlineKeyboardButton("Solana (SOL)",  callback_data="pay_sol") ],
+                [ InlineKeyboardButton("USDC",          callback_data="pay_usdc") ],
+                [ InlineKeyboardButton("USDT",          callback_data="pay_usdt") ],
+                [ InlineKeyboardButton("Other",         callback_data="crypto_other") ]
             ])
         )
     elif data in ("pay_btc","pay_eth","pay_sol","pay_usdc","pay_usdt"):
         mapping = {
-            'pay_btc':'Bitcoin (BTC)', 'pay_eth':'Ethereum (ETH)', 'pay_sol':'Solana (SOL)',
-            'pay_usdc':'USDC', 'pay_usdt':'USDT'
+            "pay_btc":"Bitcoin (BTC)",
+            "pay_eth":"Ethereum (ETH)",
+            "pay_sol":"Solana (SOL)",
+            "pay_usdc":"USDC",
+            "pay_usdt":"USDT"
         }
-        CART[user_id]['payment_method'] = mapping[data]
+        CART[user_id]["payment_method"] = mapping[data]
         await query.message.reply_text("Please enter your Instagram handle (e.g., @username)")
     elif data == "crypto_other":
-        CART[user_id]['awaiting_crypto_other'] = True
+        CART[user_id]["awaiting_crypto_other"] = True
         await query.message.reply_text("Please enter your preferred crypto (e.g., SOL, USDT, etc.)")
     elif data == "paypal":
-        CART[user_id]['payment_method'] = "PayPal"
+        CART[user_id]["payment_method"] = "PayPal"
         await query.message.reply_text("Please enter your Instagram handle (e.g., @username)")
     elif data == "mail_in":
-        CART[user_id]['payment_method'] = "Mail In"
+        CART[user_id]["payment_method"] = "Mail In"
         await query.message.reply_text("Please enter your Instagram handle (e.g., @username)")
     elif data == "add_quantity":
         await handle_add_quantity(update, context)
