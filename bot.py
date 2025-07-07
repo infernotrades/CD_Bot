@@ -1,8 +1,21 @@
-import os
-import logging
-from telegram import Update
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
-from handlers import start_command, handle_text, handle_callback_query
+ import os
+ import logging
++import threading
++from http.server import SimpleHTTPRequestHandler, HTTPServer
+ from telegram import Update
+ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
+ from handlers import start_command, handle_text, handle_callback_query
+
++#––– START fly.io healthcheck shim ––––––––––––––––––––––––––––––––
++def _serve_healthcheck():
++    port = int(os.getenv("PORT", 8080))
++    server = HTTPServer(("", port), SimpleHTTPRequestHandler)
++    server.serve_forever()
++
++# run in background so your bot logic still runs
++threading.Thread(target=_serve_healthcheck, daemon=True).start()
++#––– END fly.io healthcheck shim ––––––––––––––––––––––––––––––––
+
 
 # Logging setup
 logging.basicConfig(
