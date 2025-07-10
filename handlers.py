@@ -3,7 +3,7 @@ import json
 import re
 import logging
 from datetime import datetime
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, CallbackQuery
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 
@@ -73,7 +73,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("❓ FAQ",          callback_data="faq")],
     ]
     await update.message.reply_text(
-        "Welcome to Clones Direct! 🌱👋 By using this bot, you confirm you're 21+ and in a legal area.\n\nBrowse elite clones and build your custom order below.",
+        "Welcome to Clones Direct! 🌱👋 By using this bot, you confirm you're 21+ and in a legal area.\n\n"
+        "Browse elite clones and build your custom order below.",
         reply_markup=InlineKeyboardMarkup(keyboard),
     )
 
@@ -122,12 +123,14 @@ async def handle_add_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE
     uid = update.effective_user.id
     CART[uid]["state"] = "await_qty"
     keyboard = [
-        [InlineKeyboardButton("1", callback_data="qty_1"), InlineKeyboardButton("2", callback_data="qty_2"), InlineKeyboardButton("3", callback_data="qty_3")],
-        [InlineKeyboardButton("4", callback_data="qty_4"), InlineKeyboardButton("5", callback_data="qty_5"), InlineKeyboardButton("6", callback_data="qty_6")],
-        [InlineKeyboardButton("7", callback_data="qty_7"), InlineKeyboardButton("8", callback_data="qty_8"), InlineKeyboardButton("9", callback_data="qty_9"), InlineKeyboardButton("10", callback_data="qty_10")],
+        [InlineKeyboardButton(str(n), callback_data=f"qty_{n}") for n in (1,2,3)],
+        [InlineKeyboardButton(str(n), callback_data=f"qty_{n}") for n in (4,5,6)],
+        [InlineKeyboardButton(str(n), callback_data=f"qty_{n}") for n in (7,8,9)],
+        [InlineKeyboardButton("10", callback_data="qty_10")],
     ]
     await update.callback_query.message.reply_text(
-        "How many clones would you like to add? (Orders of 9 or more clones will require different shipping.)\n\n" + PRICING_TEXT,
+        "How many clones would you like to add? (Orders of 9 or more clones will require different shipping.)\n\n"
+        + PRICING_TEXT,
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
@@ -141,24 +144,28 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Keyword shortcuts
     for key, action in {
-        "clones":"view_strains","strains":"view_strains","menu":"view_strains",
-        "how much":"faq","faq":"faq"
+        "clones": "view_strains",
+        "strains": "view_strains",
+        "menu": "view_strains",
+        "how much": "faq",
+        "faq": "faq"
     }.items():
         if key in text.lower():
             await handle_callback_query_from_text(update, action)
             return
 
     # IG handle input
-    if CART.get(uid, {}).get("state") == "await_ig":
+    if CART[uid].get("state") == "await_ig":
         CART[uid]["ig_handle"] = text
         CART[uid]["state"] = None
+
         # Show confirmation
         items = CART[uid]["items"]
         lines = "\n".join(f"{it['strain']} x{it['quantity']}" for it in items)
         total = calculate_price(items, CART[uid]["country"], CART[uid]["payment_method"])
         summary = (
             f"🛒 Order Summary:\n{lines}\n\n"
-            f"Shipping: {CART[uid]['country'].upper()}\n"
+            f"Shipping: {CART[uid]['country']}\n"
             f"Payment: {CART[uid]['payment_method']}\n"
             f"Instagram: {text}\n"
             f"Total: ${total:.2f}\n\n"
@@ -166,13 +173,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         keyboard = [[
             InlineKeyboardButton("✅ Confirm Order", callback_data="confirm_order"),
-            InlineKeyboardButton("❌ Cancel", callback_data="cancel_order")
+            InlineKeyboardButton("❌ Cancel",        callback_data="cancel_order")
         ]]
         await update.message.reply_text(summary, reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
     # Custom crypto input
-    if CART.get(uid, {}).get("state") == "await_crypto_other":
+    if CART[uid].get("state") == "await_crypto_other":
         CART[uid]["payment_method"] = f"Crypto - {text.upper()}"
         CART[uid]["state"] = None
         await show_country_selection(update, context)
@@ -202,18 +209,22 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         if "last_strain" not in CART[uid]:
             await update.callback_query.message.reply_text("❌ No strain selected.")
             return
-        CART[uid]["items"].append({"strain": CART[uid]["last_strain"], "quantity": qty})
+        CART[uid]["items"].append({
+            "strain": CART[uid]["last_strain"],
+            "quantity": qty
+        })
         del CART[uid]["last_strain"]
         CART[uid]["state"] = None
         await update.callback_query.message.reply_text(
             f"🎉 Added {CART[uid]['items'][-1]['strain']} x{qty} to your cart!",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🛒 View Cart", callback_data="view_cart")],
+                [InlineKeyboardButton("🛒 View Cart",    callback_data="view_cart")],
                 [InlineKeyboardButton("🔙 Back to Menu", callback_data="view_strains")],
             ])
         )
         return
 
+    # Main actions
     if data == "view_strains":
         await update.callback_query.message.reply_text(
             "📋 Select a strain to view details:",
@@ -228,12 +239,11 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             return
         summary = "\n".join(f"{i+1}. {it['strain']} x{it['quantity']}" for i, it in enumerate(items))
         subtotal = calculate_subtotal(items)
-        keyboard = []
-        for i, it in enumerate(items):
-            keyboard.append([InlineKeyboardButton(f"❌ Remove {it['strain']}", callback_data=f"remove_{i}")])
-        keyboard += [
+        keyboard = [
+            *[[InlineKeyboardButton(f"❌ Remove {it['strain']}", callback_data=f"remove_{i}")]
+              for i, it in enumerate(items)],
             [InlineKeyboardButton("✅ Finalize Order", callback_data="finalize_order")],
-            [InlineKeyboardButton("🔙 Back to Menu", callback_data="view_strains")]
+            [InlineKeyboardButton("🔙 Back to Menu",    callback_data="view_strains")],
         ]
         await update.callback_query.message.reply_text(
             f"🛒 *Your Cart*\n\n{summary}\n\nSubtotal: ${subtotal:.2f} (before shipping/fees)",
@@ -245,7 +255,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         if idx < len(CART[uid]["items"]):
             del CART[uid]["items"][idx]
         await update.callback_query.message.reply_text("✅ Item removed. Refreshing cart...")
-        await handle_callback_query(update, context)  # Recurse to refresh view_cart
+        await handle_callback_query(update, context)
     elif data == "finalize_order":
         if not CART[uid]["items"]:
             await update.callback_query.message.reply_text("🛒 Your cart is empty. Add items first!")
@@ -254,8 +264,8 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             "💳 Select payment method:",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("💰 Crypto (No Fee)", callback_data="payment_crypto")],
-                [InlineKeyboardButton("💳 PayPal (+5%)", callback_data="payment_paypal")],
-                [InlineKeyboardButton("✉️ Mail In", callback_data="payment_mail_in")],
+                [InlineKeyboardButton("💳 PayPal (+5%)",    callback_data="payment_paypal")],
+                [InlineKeyboardButton("✉️ Mail In",         callback_data="payment_mail_in")],
             ])
         )
     elif data.startswith("payment_"):
@@ -264,8 +274,12 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             await update.callback_query.message.reply_text(
                 "Select your crypto:",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("BTC", callback_data="crypto_btc"), InlineKeyboardButton("ETH", callback_data="crypto_eth"), InlineKeyboardButton("SOL", callback_data="crypto_sol")],
-                    [InlineKeyboardButton("USDC", callback_data="crypto_usdc"), InlineKeyboardButton("USDT", callback_data="crypto_usdt"), InlineKeyboardButton("Other", callback_data="crypto_other")],
+                    [InlineKeyboardButton("BTC", callback_data="crypto_btc"),
+                     InlineKeyboardButton("ETH", callback_data="crypto_eth"),
+                     InlineKeyboardButton("SOL", callback_data="crypto_sol")],
+                    [InlineKeyboardButton("USDC", callback_data="crypto_usdc"),
+                     InlineKeyboardButton("USDT", callback_data="crypto_usdt"),
+                     InlineKeyboardButton("Other", callback_data="crypto_other")],
                 ])
             )
             return
@@ -301,7 +315,6 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             f"• Total: ${total:.2f}\n"
             f"• Items:\n{lines}"
         )
-        # Always log the order
         log_order(order_msg, status="attempt")
         try:
             await context.bot.send_message(
@@ -316,21 +329,9 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         except Exception as e:
             logger.error(f"Failed to send order to admin: {e}")
             await update.callback_query.message.reply_text(
-                "⚠️ Order recorded, but we had trouble notifying our team. We've saved your order and will contact you soon via Instagram to confirm."
+                "⚠️ Order recorded, but we had trouble notifying our team. "
+                "We've saved your order and will contact you soon via Instagram to confirm."
             )
-            """
-            # Optional: Email fallback (requires setup, e.g., SMTP server)
-            import smtplib
-            from email.mime.text import MIMEText
-            msg = MIMEText(order_msg)
-            msg['Subject'] = 'New Clones Direct Order'
-            msg['From'] = 'bot@clonesdirect.com'
-            msg['To'] = 'admin@clonesdirect.com'
-            with smtplib.SMTP('smtp.gmail.com', 587) as server:
-                server.starttls()
-                server.login('your_email', 'your_password')
-                server.send_message(msg)
-            """
         del CART[uid]
     elif data == "cancel_order":
         await update.callback_query.message.reply_text("❌ Order canceled. Start over with /start.")
@@ -341,8 +342,8 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 async def show_country_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.effective_message
     keyboard = [
-        [InlineKeyboardButton("🇺🇸 USA ($40 Shipping)", callback_data="country_usa")],
-        [InlineKeyboardButton("🌍 International ($100 Shipping)", callback_data="country_intl")]
+        [InlineKeyboardButton("🇺🇸 USA ($40 Shipping)",         callback_data="country_usa")],
+        [InlineKeyboardButton("🌍 International ($100 Shipping)", callback_data="country_intl")],
     ]
     await message.reply_text(
         "📍 Where are you shipping to? This affects your total.",
@@ -350,10 +351,12 @@ async def show_country_selection(update: Update, context: ContextTypes.DEFAULT_T
     )
 
 async def handle_callback_query_from_text(update, action):
-    class DummyCQ:
-        def __init__(self, msg, a): self.message, self.data = msg, a
-        async def answer(self): pass
-    from telegram import CallbackQuery
-    dummy_query = CallbackQuery(id=0, from_user=update.effective_user, chat_instance="", message=update.message, data=action)
+    dummy_query = CallbackQuery(
+        id=0,
+        from_user=update.effective_user,
+        chat_instance="",
+        message=update.message,
+        data=action
+    )
     dummy_update = Update(update.update_id, callback_query=dummy_query)
     await handle_callback_query(dummy_update, None)
