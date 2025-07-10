@@ -119,7 +119,7 @@ async def handle_add_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE
         [InlineKeyboardButton("7", callback_data="qty_7"), InlineKeyboardButton("8", callback_data="qty_8"), InlineKeyboardButton("9", callback_data="qty_9"), InlineKeyboardButton("10", callback_data="qty_10")],
     ]
     await update.callback_query.message.reply_text(
-        "How many clones would you like to add? (Max 16)\n\n" + PRICING_TEXT,
+        "How many clones would you like to add? (Orders of 9 or more clones will require different shipping.)\n\n" + PRICING_TEXT,
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
@@ -161,6 +161,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("❌ Cancel", callback_data="cancel_order")
         ]]
         await update.message.reply_text(summary, reply_markup=InlineKeyboardMarkup(keyboard))
+        return
+
+    # Custom crypto input
+    if CART.get(uid, {}).get("state") == "await_crypto_other":
+        CART[uid]["payment_method"] = f"Crypto - {text.upper()}"
+        CART[uid]["state"] = None
+        await show_country_selection(update, context)
         return
 
     # Fallback for invalid inputs
@@ -250,8 +257,8 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             await update.callback_query.message.reply_text(
                 "Select your crypto:",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("BTC", callback_data="crypto_btc"), InlineKeyboardButton("ETH", callback_data="crypto_eth")],
-                    [InlineKeyboardButton("SOL", callback_data="crypto_sol"), InlineKeyboardButton("USDC", callback_data="crypto_usdc")],
+                    [InlineKeyboardButton("BTC", callback_data="crypto_btc"), InlineKeyboardButton("ETH", callback_data="crypto_eth"), InlineKeyboardButton("SOL", callback_data="crypto_sol")],
+                    [InlineKeyboardButton("USDC", callback_data="crypto_usdc"), InlineKeyboardButton("USDT", callback_data="crypto_usdt"), InlineKeyboardButton("Other", callback_data="crypto_other")],
                 ])
             )
             return
@@ -260,16 +267,21 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         # Proceed to country
         await show_country_selection(update, context)
     elif data.startswith("crypto_"):
-        coin = data.split("_")[1].upper()
-        CART[uid]["payment_method"] = f"Crypto - {coin}"
-        await show_country_selection(update, context)
+        if data == "crypto_other":
+            CART[uid]["state"] = "await_crypto_other"
+            await update.callback_query.message.reply_text("Enter the crypto token you wish to use (e.g., LTC):")
+            return
+        else:
+            coin = data.split("_")[1].upper()
+            CART[uid]["payment_method"] = f"Crypto - {coin}"
+            await show_country_selection(update, context)
     elif data.startswith("country_"):
         country = "USA" if data == "country_usa" else "International"
         CART[uid]["country"] = country
         CART[uid]["state"] = "await_ig"
         await update.callback_query.message.reply_text("Please enter your Instagram handle (e.g., @username)")
     elif data == "confirm_order":
-        # Send to admin
+        # Send to admin with try-except
         items = CART[uid]["items"]
         lines = "\n".join(f"- {it['strain']} x{it['quantity']}" for it in items)
         user = update.effective_user
@@ -284,12 +296,18 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             f"• Total: ${total:.2f}\n"
             f"• Items:\n{lines}"
         )
-        await context.bot.send_message(
-            chat_id=ADMIN_CHAT_ID,
-            text=order_msg,
-            parse_mode=ParseMode.MARKDOWN
-        )
-        await update.callback_query.message.reply_text("👍 Order confirmed! We've sent it for processing. We'll reach out shortly.")
+        try:
+            await context.bot.send_message(
+                chat_id=ADMIN_CHAT_ID,
+                text=order_msg,
+                parse_mode=ParseMode.MARKDOWN
+            )
+        except Exception as e:
+            logger.error(f"Failed to send order to admin: {e}")
+            # Still confirm to user
+            await update.callback_query.message.reply_text("👍 Order confirmed! We've sent it for processing. We'll reach out shortly. (Admin notification may have failed, but your order is noted.)")
+        else:
+            await update.callback_query.message.reply_text("👍 Order confirmed! We've sent it for processing. We'll reach out shortly.")
         del CART[uid]
     elif data == "cancel_order":
         await update.callback_query.message.reply_text("❌ Order canceled. Start over with /start.")
@@ -298,11 +316,12 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         await handle_add_quantity(update, context)
 
 async def show_country_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.effective_message
     keyboard = [
         [InlineKeyboardButton("🇺🇸 USA ($40 Shipping)", callback_data="country_usa")],
         [InlineKeyboardButton("🌍 International ($100 Shipping)", callback_data="country_intl")]
     ]
-    await update.callback_query.message.reply_text(
+    await message.reply_text(
         "📍 Where are you shipping to? This affects your total.",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
