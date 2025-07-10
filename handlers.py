@@ -119,7 +119,7 @@ async def handle_add_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE
         [InlineKeyboardButton("7", callback_data="qty_7"), InlineKeyboardButton("8", callback_data="qty_8"), InlineKeyboardButton("9", callback_data="qty_9"), InlineKeyboardButton("10", callback_data="qty_10")],
     ]
     await update.callback_query.message.reply_text(
-        "How many clones would you like to add? (Max 10)\n\n" + PRICING_TEXT,
+        "How many clones would you like to add? (Max 16)\n\n" + PRICING_TEXT,
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
