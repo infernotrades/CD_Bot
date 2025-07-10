@@ -2,6 +2,7 @@ import os
 import json
 import re
 import logging
+from datetime import datetime
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
@@ -30,6 +31,7 @@ Frequently Asked Questions
 • 7-day satisfaction guarantee.
 • 1 free reship allowed (then customer covers shipping).
 • All clones are grown in Oasis root cubes.
+• Your Telegram and Instagram data is only used for order processing.
 """
 
 PRICING_TEXT = """
@@ -55,6 +57,12 @@ def calculate_price(items, country, payment_method):
     shipping = 40 if country.lower() == "usa" else 100
     fee = 0.05 * (subtotal + shipping) if "PayPal" in payment_method else 0
     return subtotal + shipping + fee
+
+def log_order(order_msg, status="success"):
+    """Log order to a file with timestamp and status."""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open("orders.log", "a") as f:
+        f.write(f"[{timestamp}] {status.upper()}\n{order_msg}\n{'-'*50}\n")
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -176,14 +184,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     data = update.callback_query.data
-    uid  = update.effective_user.id
+    uid = update.effective_user.id
 
     if uid not in CART:
         CART[uid] = {"items": [], "state": None}
 
     # Strain details
     if data.startswith("strain_"):
-        idx = int(data.split("_",1)[1])
+        idx = int(data.split("_", 1)[1])
         name = STRAINS[idx]["name"]
         await send_strain_details(update, context, name)
         return
@@ -218,7 +226,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         if not items:
             await update.callback_query.message.reply_text("🛒 Your cart is empty.")
             return
-        summary = "\n".join(f"{i+1}. {it['strain']} x{it['quantity']}" for i,it in enumerate(items))
+        summary = "\n".join(f"{i+1}. {it['strain']} x{it['quantity']}" for i, it in enumerate(items))
         subtotal = calculate_subtotal(items)
         keyboard = []
         for i, it in enumerate(items):
@@ -238,7 +246,6 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             del CART[uid]["items"][idx]
         await update.callback_query.message.reply_text("✅ Item removed. Refreshing cart...")
         await handle_callback_query(update, context)  # Recurse to refresh view_cart
-        # Note: To avoid recursion depth, better to call view_cart directly, but for simplicity
     elif data == "finalize_order":
         if not CART[uid]["items"]:
             await update.callback_query.message.reply_text("🛒 Your cart is empty. Add items first!")
@@ -264,7 +271,6 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             return
         else:
             CART[uid]["payment_method"] = "PayPal" if method == "paypal" else "Mail In"
-        # Proceed to country
         await show_country_selection(update, context)
     elif data.startswith("crypto_"):
         if data == "crypto_other":
@@ -281,7 +287,6 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         CART[uid]["state"] = "await_ig"
         await update.callback_query.message.reply_text("Please enter your Instagram handle (e.g., @username)")
     elif data == "confirm_order":
-        # Send to admin with try-except
         items = CART[uid]["items"]
         lines = "\n".join(f"- {it['strain']} x{it['quantity']}" for it in items)
         user = update.effective_user
@@ -296,18 +301,36 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             f"• Total: ${total:.2f}\n"
             f"• Items:\n{lines}"
         )
+        # Always log the order
+        log_order(order_msg, status="attempt")
         try:
             await context.bot.send_message(
                 chat_id=ADMIN_CHAT_ID,
                 text=order_msg,
                 parse_mode=ParseMode.MARKDOWN
             )
+            log_order(order_msg, status="success")
+            await update.callback_query.message.reply_text(
+                "👍 Order confirmed! We've sent it to our team for processing. We'll reach out soon via Instagram."
+            )
         except Exception as e:
             logger.error(f"Failed to send order to admin: {e}")
-            # Still confirm to user
-            await update.callback_query.message.reply_text("👍 Order confirmed! We've sent it for processing. We'll reach out shortly. (Admin notification may have failed, but your order is noted.)")
-        else:
-            await update.callback_query.message.reply_text("👍 Order confirmed! We've sent it for processing. We'll reach out shortly.")
+            await update.callback_query.message.reply_text(
+                "⚠️ Order recorded, but we had trouble notifying our team. We've saved your order and will contact you soon via Instagram to confirm."
+            )
+            """
+            # Optional: Email fallback (requires setup, e.g., SMTP server)
+            import smtplib
+            from email.mime.text import MIMEText
+            msg = MIMEText(order_msg)
+            msg['Subject'] = 'New Clones Direct Order'
+            msg['From'] = 'bot@clonesdirect.com'
+            msg['To'] = 'admin@clonesdirect.com'
+            with smtplib.SMTP('smtp.gmail.com', 587) as server:
+                server.starttls()
+                server.login('your_email', 'your_password')
+                server.send_message(msg)
+            """
         del CART[uid]
     elif data == "cancel_order":
         await update.callback_query.message.reply_text("❌ Order canceled. Start over with /start.")
