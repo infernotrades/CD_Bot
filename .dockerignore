@@ -21,6 +21,7 @@ var/
 *.egg-info/
 .installed.cfg
 *.log
+orders.log  # Added
 *.db
 *.sqlite3
 *.jpg
