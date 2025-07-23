@@ -3,5 +3,7 @@ app = "cd-bot"
 [build]
 
 [env]
-  # (you don’t need PORT here once you remove services)
-  # PORT = "8080"
+
+[mounts]
+  source = "orders_data"
+  destination = "/app/data"
