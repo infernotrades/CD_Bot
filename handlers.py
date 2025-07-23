@@ -10,10 +10,8 @@ from telegram.constants import ParseMode
 # Setup logger
 logger = logging.getLogger(__name__)
 
-# Admin chat ID from environment
-ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")
-if not ADMIN_CHAT_ID:
-    logger.warning("ADMIN_CHAT_ID is not set! Orders won't be sent to admin.")
+# Admin chat ID (numeric or @handle) from environment
+ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID", "@clones_direct")
 
 # Load & sort strains alphabetically by name
 with open("strains.json", "r") as f:
@@ -66,6 +64,11 @@ def log_order(order_msg, status="success"):
     with open("orders.log", "a") as f:
         f.write(f"[{timestamp}] {status.upper()}\n{order_msg}\n{'-'*50}\n")
 
+def escape_markdown(text):
+    """Escape special characters for MarkdownV2."""
+    special_chars = r'_*[]()~`>#+-=|{}.!'
+    return ''.join(['\\' + c if c in special_chars else c for c in text])
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     CART[uid] = {"items": [], "state": None}
@@ -101,10 +104,10 @@ async def send_strain_details(update: Update, context: ContextTypes.DEFAULT_TYPE
     CART[uid]["last_strain"] = name
 
     caption = (
-        f"*{strain['name']}*\n"
-        f"_Genetics:_ {strain['lineage']}\n"
-        f"_Breeder:_ {strain.get('breeder','Unknown')}\n\n"
-        f"{strain.get('notes','')}"
+        f"*{escape_markdown(strain['name'])}*\n"
+        f"_Genetics:_ {escape_markdown(strain['lineage'])}\n"
+        f"_Breeder:_ {escape_markdown(strain.get('breeder','Unknown'))}\n\n"
+        f"{escape_markdown(strain.get('notes',''))}"
     )
     if strain.get("breeder_url"):
         caption += f"\n\n[Breeder Info]({strain['breeder_url']})"
@@ -116,7 +119,7 @@ async def send_strain_details(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.callback_query.message.reply_photo(
         photo=strain["image_url"],
         caption=caption,
-        parse_mode=ParseMode.MARKDOWN,
+        parse_mode=ParseMode.MARKDOWN_V2,
         reply_markup=InlineKeyboardMarkup(keyboard),
     )
 
@@ -227,18 +230,18 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         if not items:
             await update.callback_query.message.reply_text("🛒 Your cart is empty.")
             return
-        summary = "\n".join(f"{i+1}. {it['strain']} x{it['quantity']}" for i,it in enumerate(items))
+        summary = "\n".join(f"{i+1}. {escape_markdown(it['strain'])} x{it['quantity']}" for i,it in enumerate(items))
         subtotal = calculate_subtotal(items)
         keyboard = []
         for i, it in enumerate(items):
-            keyboard.append([InlineKeyboardButton(f"❌ Remove {it['strain']}", callback_data=f"remove_{i}")])
+            keyboard.append([InlineKeyboardButton(f"❌ Remove {escape_markdown(it['strain'])}", callback_data=f"remove_{i}")])
         keyboard += [
             [InlineKeyboardButton("✅ Finalize Order", callback_data="finalize_order")],
             [InlineKeyboardButton("🔙 Back to Menu", callback_data="view_strains")]
         ]
         await update.callback_query.message.reply_text(
             f"🛒 *Your Cart*\n\n{summary}\n\nSubtotal: ${subtotal:.2f} (before shipping/fees)",
-            parse_mode=ParseMode.MARKDOWN,
+            parse_mode=ParseMode.MARKDOWN_V2,
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
     elif data.startswith("remove_"):
@@ -246,10 +249,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         if idx < len(CART[uid]["items"]):
             del CART[uid]["items"][idx]
         await update.callback_query.message.reply_text("✅ Item removed. Refreshing cart...")
-        # Refresh cart view
-        dummy_update = Update(update.update_id, callback_query=update.callback_query)
-        dummy_update.callback_query.data = "view_cart"
-        await handle_callback_query(dummy_update, context)
+        await handle_callback_query(update, context)  # Recurse to refresh view_cart
     elif data == "finalize_order":
         if not CART[uid]["items"]:
             await update.callback_query.message.reply_text("🛒 Your cart is empty. Add items first!")
@@ -272,23 +272,55 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                     [InlineKeyboardButton("USDC", callback_data="crypto_usdc"), InlineKeyboardButton("USDT", callback_data="crypto_usdt"), InlineKeyboardButton("Other", callback_data="crypto_other")],
                 ])
             )
+            return
         else:
-            CART[uid]["payment_method"] = {"paypal": "PayPal", "mail_in": "Mail In"}[method]
-            await show_country_selection(update, context)
+            CART[uid]["payment_method"] = "PayPal" if method == "paypal" else "Mail In"
+        await show_country_selection(update, context)
     elif data.startswith("crypto_"):
         if data == "crypto_other":
             CART[uid]["state"] = "await_crypto_other"
             await update.callback_query.message.reply_text("Enter the crypto token you wish to use (e.g., LTC)")
+            return
         else:
             coin = data.split("_")[1].upper()
             CART[uid]["payment_method"] = f"Crypto - {coin}"
             await show_country_selection(update, context)
     elif data.startswith("country_"):
-        CART[uid]["country"] = "USA" if data == "country_usa" else "International"
+        country = "USA" if data == "country_usa" else "International"
+        CART[uid]["country"] = country
         CART[uid]["state"] = "await_ig"
         await update.callback_query.message.reply_text("Please enter your Instagram handle (e.g., @username)")
     elif data == "confirm_order":
-        await handle_confirm_order(update, context, uid)
+        items = CART[uid]["items"]
+        lines = "\n".join(f"- {escape_markdown(it['strain'])} x{it['quantity']}" for it in items)
+        user = update.effective_user
+        uname = escape_markdown(f"@{user.username}" if user.username else user.first_name)
+        ig_handle = escape_markdown(CART[uid]["ig_handle"])
+        payment_method = escape_markdown(CART[uid]["payment_method"])
+        country = escape_markdown(CART[uid]["country"])
+        total = calculate_price(items, CART[uid]["country"], CART[uid]["payment_method"])
+        order_msg = (
+            f"📦 *New Order*\n"
+            f"• Telegram: {uname}\n"
+            f"• Instagram: {ig_handle}\n"
+            f"• Payment: {payment_method}\n"
+            f"• Shipping: {country}\n"
+            f"• Total: \\${total:.2f}\n"
+            f"• Items:\n{lines}"
+        )
+        log_order(order_msg, status="attempt")
+        try:
+            await context.bot.send_message(
+                chat_id=ADMIN_CHAT_ID,
+                text=order_msg,
+                parse_mode=ParseMode.MARKDOWN_V2
+            )
+            log_order(order_msg, status="success")
+            await update.callback_query.message.reply_text("👍 Order confirmed! We've sent it for processing. We'll reach out shortly.")
+        except Exception as e:
+            logger.error(f"Failed to send order to admin: {e}")
+            await update.callback_query.message.reply_text("⚠️ Order recorded, but we had trouble notifying our team. We've saved your order and will contact you soon via Instagram to confirm.")
+        del CART[uid]
     elif data == "cancel_order":
         await update.callback_query.message.reply_text("❌ Order canceled. Start over with /start.")
         del CART[uid]
@@ -298,46 +330,12 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 async def show_country_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("🇺🇸 USA ($40 Shipping)", callback_data="country_usa")],
-        [InlineKeyboardButton("🌍 International ($100 Shipping", callback_data="country_intl")],
+        [InlineKeyboardButton("🌍 International ($100 Shipping)", callback_data="country_intl")]
     ]
     await update.effective_message.reply_text(
         "📍 Where are you shipping to? This affects your total.",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
-
-async def handle_confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE, uid: int):
-    items = CART[uid]["items"]
-    lines = "\n".join(f"- {it['strain']} x{it['quantity']}" for it in items)
-    user = update.effective_user
-    uname = f"@{user.username}" if user.username else user.first_name
-    total = calculate_price(items, CART[uid]["country"], CART[uid]["payment_method"])
-    order_msg = (
-        f"📦 *New Order*\n"
-        f"• Telegram: {uname}\n"
-        f"• Instagram: {CART[uid]['ig_handle']}\n"
-        f"• Payment: {CART[uid]['payment_method']}\n"
-        f"• Shipping: {CART[uid]['country']}\n"
-        f"• Total: ${total:.2f}\n"
-        f"• Items:\n{lines}"
-    )
-    log_order(order_msg, status="attempt")
-    logger.info(f"Sending order to ADMIN_CHAT_ID: {ADMIN_CHAT_ID or 'NOT SET'}")
-    if not ADMIN_CHAT_ID:
-        logger.error("ADMIN_CHAT_ID not set - cannot send DM.")
-        await update.callback_query.message.reply_text("⚠️ Order recorded, but admin notification failed (ID not set). Contact support.")
-        return
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_CHAT_ID,
-            text=order_msg,
-            parse_mode=ParseMode.MARKDOWN
-        )
-        log_order(order_msg, status="success")
-        await update.callback_query.message.reply_text("👍 Order confirmed! We've sent it for processing. We'll reach out shortly.")
-    except Exception as e:
-        logger.error(f"Failed to send order to admin: {e}")
-        await update.callback_query.message.reply_text(f"⚠️ Order recorded, but admin notification failed. Error: {e}. We've saved it and will contact you soon.")
-    del CART[uid]
 
 async def handle_callback_query_from_text(update, action):
     class DummyCQ:
