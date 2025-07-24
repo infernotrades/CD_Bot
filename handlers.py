@@ -128,32 +128,24 @@ def delete_order(order_id):
 
 def log_order(msg, status="success"):
     log_path = os.path.join(os.path.dirname(DB_PATH), "order_log.txt")
-    try:
-        with open(log_path, "a") as f:
-            f.write(f"[{datetime.now().isoformat()}] [{status.upper()}] {msg}\n")
-    except Exception as e:
-        logger.error(f"Failed to log order: {e}")
+    with open(log_path, "a") as f:
+        f.write(f"[{datetime.now().isoformat()}] [{status.upper()}] {msg}\n")
 
 async def faq(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(FAQ_TEXT, parse_mode=ParseMode.HTML)
 
 async def list_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id_str = str(update.effective_chat.id)
-    admin_id_str = str(ADMIN_CHAT_ID).lstrip('@')
-    if chat_id_str != admin_id_str and update.effective_user.username != "Clones_Direct":
+    admin_id = str(ADMIN_CHAT_ID).replace("@", "") if ADMIN_CHAT_ID.startswith("@") else ADMIN_CHAT_ID
+    if chat_id_str != admin_id and update.effective_user.username != "Clones_Direct":
         await update.message.reply_text("❌ Unauthorized.")
         return
     ensure_db()
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        c.execute("SELECT * FROM orders WHERE status = 'pending'")
-        orders = c.fetchall()
-        conn.close()
-    except Exception as e:
-        logger.error(f"Failed to list orders: {e}")
-        await update.message.reply_text("⚠️ Error accessing orders. Check logs.")
-        return
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT * FROM orders WHERE status = 'pending'")
+    orders = c.fetchall()
+    conn.close()
     if not orders:
         await update.message.reply_text("No pending orders.")
         return
@@ -168,7 +160,85 @@ async def list_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard))
 
-# ... (the rest of the code remains the same as in the previous handlers.py, including start_command, get_strain_buttons, send_strain_details, handle_add_quantity, show_confirmation_summary, handle_text, handle_callback_query, show_country_selection, handle_callback_query_from_text)
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    CART[uid] = {"items": [], "state": None}
+    keyboard = [
+        [InlineKeyboardButton("📋 View Strains", callback_data="view_strains")],
+        [InlineKeyboardButton("🛒 View Cart",    callback_data="view_cart")],
+        [InlineKeyboardButton("❓ FAQ",          callback_data="faq")],
+    ]
+    await update.message.reply_text(
+        "Welcome to Clones Direct! 🌱👋 Browse elite clones and build your custom order below.\n\nBy using this bot, you confirm you're 21+ and in a legal area.",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
+
+def get_strain_buttons():
+    buttons = []
+    if not STRAINS:
+        return [[InlineKeyboardButton("No strains available", callback_data="noop")]]
+    for i in range(0, len(STRAINS), 2):
+        row = []
+        for j in (0, 1):
+            idx = i + j
+            if idx < len(STRAINS):
+                name = STRAINS[idx]["name"]
+                row.append(InlineKeyboardButton(name, callback_data=f"strain_{idx}"))
+        buttons.append(row)
+    return buttons
+
+async def send_strain_details(update: Update, context: ContextTypes.DEFAULT_TYPE, name: str):
+    strain = next((s for s in STRAINS if s["name"] == name), None)
+    if not strain:
+        await update.callback_query.message.reply_text("❌ Strain not found.")
+        return
+
+    uid = update.effective_user.id
+    CART[uid]["last_strain"] = name
+
+    caption = (
+        f"<b>{name}</b>\n"
+        f"<i>Genetics:</i> {strain['lineage']}\n"
+        f"<i>Breeder:</i> {strain.get('breeder','Unknown')}\n\n"
+        f"{strain.get('notes','')}"
+    )
+    if strain.get("breeder_url"):
+        caption += f'\n\n<a href="{strain["breeder_url"]}">Breeder Info</a>'
+
+    keyboard = [[
+        InlineKeyboardButton("➕ Add to Cart", callback_data="add_quantity"),
+        InlineKeyboardButton("🔙 Back to Menu", callback_data="view_strains")
+    ]]
+    await update.callback_query.message.reply_photo(
+        photo=strain["image_url"],
+        caption=caption,
+        parse_mode=ParseMode.HTML,
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
+
+async def handle_add_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    CART[uid]["state"] = "await_qty"
+    keyboard = [
+        [InlineKeyboardButton("1", callback_data="qty_1"), InlineKeyboardButton("2", callback_data="qty_2"), InlineKeyboardButton("3", callback_data="qty_3")],
+        [InlineKeyboardButton("4", callback_data="qty_4"), InlineKeyboardButton("5", callback_data="qty_5"), InlineKeyboardButton("6", callback_data="qty_6")],
+        [InlineKeyboardButton("7", callback_data="qty_7"), InlineKeyboardButton("8", callback_data="qty_8"), InlineKeyboardButton("9", callback_data="qty_9"), InlineKeyboardButton("10", callback_data="qty_10")],
+    ]
+    await update.callback_query.message.reply_text(
+        "How many clones would you like to add? (Max 10)\n\n" + PRICING_TEXT,
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+async def show_country_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [InlineKeyboardButton("🇺🇸 USA ($40 Shipping)", callback_data="country_usa")],
+        [InlineKeyboardButton("🌍 International ($100 Shipping", callback_data="country_intl")],
+    ]
+    await update.callback_query.message.reply_text(
+        "📍 Where are you shipping to? This affects your total.",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
 async def handle_callback_query_from_text(update, action):
     class DummyQuery:
         def __init__(self, msg, data):
