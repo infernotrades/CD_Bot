@@ -1,9 +1,35 @@
 app = "cd-bot"
+primary_region = "sjc"  # Adjust to your region, e.g., 'sjc' from machine ID d8d9793a540448
 
-[build]
+kill_signal = "SIGINT"
+kill_timeout = "5s"
 
-[env]
+[experimental]
+  auto_rollback = true
 
 [mounts]
   source = "orders_data"
   destination = "/app/data"
+
+[build]
+  image = "registry.fly.io/cd-bot"
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 8080
+  ports = [
+    {
+      port = 80
+      handlers = ["http"]
+      force_https = true
+    },
+    {
+      port = 443
+      handlers = ["http"]
+    }
+  ]
+
+  [[services.tcp_checks]]
+    interval = "10s"
+    timeout = "2s"
+    grace_period = "5s"
