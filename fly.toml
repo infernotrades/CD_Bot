@@ -1,5 +1,5 @@
 app = "cd-bot"
-primary_region = "sjc"  # Adjust to your region, e.g., 'sjc' from machine ID d8d9793a540448
+primary_region = "sjc"  # Adjust to your actual region (check 'fly status')
 
 kill_signal = "SIGINT"
 kill_timeout = "5s"
@@ -7,12 +7,12 @@ kill_timeout = "5s"
 [experimental]
   auto_rollback = true
 
+[build]
+  dockerfile = "Dockerfile"
+
 [mounts]
   source = "orders_data"
-  destination = "/app/data"
-
-[build]
-  image = "registry.fly.io/cd-bot"
+  destination = "/data"
 
 [[services]]
   protocol = "tcp"
