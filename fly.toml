@@ -1,5 +1,5 @@
 app = "cd-bot"
-primary_region = "sea"  # Updated from logs (sea region in your output)
+primary_region = "sea"  # From your logs (sea region)
 
 kill_signal = "SIGINT"
 kill_timeout = "5s"
@@ -12,7 +12,7 @@ kill_timeout = "5s"
 
 [mounts]
   source = "orders_data"
-  destination = "/app/data"  # Match logs mount path
+  destination = "/app/data"
 
 [[services]]
   protocol = "tcp"
