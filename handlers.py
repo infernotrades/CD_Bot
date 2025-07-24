@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import logging
 from datetime import datetime
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -56,6 +57,16 @@ def calculate_price(items, country, payment_method):
     fee = 0.05 * (subtotal + shipping) if "PayPal" in payment_method else 0
     return subtotal + shipping + fee
 
+def log_order(order_msg, status="success"):
+    """Log order to a file with timestamp and status."""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open("orders.log", "a") as f:
+        f.write(f"[{timestamp}] {status.upper()}\n{order_msg}\n{'-'*50}\n")
+
+def escape_markdown_v2(text):
+    special_chars = '_*[]()~`>#+-=|{}.!'
+    return ''.join(['\\' + c if c in special_chars else c for c in text])
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     CART[uid] = {"items": [], "state": None}
@@ -91,13 +102,13 @@ async def send_strain_details(update: Update, context: ContextTypes.DEFAULT_TYPE
     CART[uid]["last_strain"] = name
 
     caption = (
-        f"<b>{name}</b>\n"
-        f"<i>Genetics:</i> {strain['lineage']}\n"
-        f"<i>Breeder:</i> {strain.get('breeder','Unknown')}\n\n"
-        f"{strain.get('notes','')}"
+        f"*{escape_markdown_v2(name)}*\n"
+        f"_Genetics:_ {escape_markdown_v2(strain['lineage'])}\n"
+        f"_Breeder:_ {escape_markdown_v2(strain.get('breeder','Unknown'))}\n\n"
+        f"{escape_markdown_v2(strain.get('notes',''))}"
     )
     if strain.get("breeder_url"):
-        caption += f'\n\n<a href="{strain["breeder_url"]}">Breeder Info</a>'
+        caption += f"\n\n[Breeder Info]({strain['breeder_url']})"
 
     keyboard = [[
         InlineKeyboardButton("➕ Add to Cart", callback_data="add_quantity"),
@@ -106,7 +117,7 @@ async def send_strain_details(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.callback_query.message.reply_photo(
         photo=strain["image_url"],
         caption=caption,
-        parse_mode=ParseMode.HTML,
+        parse_mode=ParseMode.MARKDOWN_V2,
         reply_markup=InlineKeyboardMarkup(keyboard),
     )
 
@@ -144,23 +155,23 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if CART.get(uid, {}).get("state") == "await_ig":
         CART[uid]["ig_handle"] = text
         CART[uid]["state"] = None
-        # Show summary and 21+ confirmation button
+        # Show confirmation
         items = CART[uid]["items"]
-        lines = "\n".join(f"{it['strain']} x{it['quantity']}" for it in items)
+        lines = "\n".join(f"{escape_markdown_v2(it['strain'])} x{it['quantity']}" for it in items)
         total = calculate_price(items, CART[uid]["country"], CART[uid]["payment_method"])
         summary = (
             f"🛒 Order Summary:\n{lines}\n\n"
-            f"Shipping: {CART[uid]['country'].upper()}\n"
-            f"Payment: {CART[uid]['payment_method']}\n"
-            f"Instagram: {text}\n"
-            f"Total: ${total:.2f}\n\n"
-            "By confirming, you verify you're 21+ and in a legal area. Proceed?"
+            f"Shipping: {escape_markdown_v2(CART[uid]['country'].upper())}\n"
+            f"Payment: {escape_markdown_v2(CART[uid]['payment_method'])}\n"
+            f"Instagram: {escape_markdown_v2(text)}\n"
+            f"Total: \\${total:.2f}\n\n"
+            "Looks good? Confirm to send your order."
         )
         keyboard = [[
-            InlineKeyboardButton("✅ Confirm & Submit", callback_data="submit_order"),
+            InlineKeyboardButton("✅ Confirm Order", callback_data="confirm_order"),
             InlineKeyboardButton("❌ Cancel", callback_data="cancel_order")
         ]]
-        await update.message.reply_text(summary, reply_markup=InlineKeyboardMarkup(keyboard))
+        await update.message.reply_text(summary, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
     # Custom crypto input
@@ -181,6 +192,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     if uid not in CART:
         CART[uid] = {"items": [], "state": None}
 
+    # strain_{index}
     if data.startswith("strain_"):
         idx = int(data.split("_",1)[1])
         name = STRAINS[idx]["name"]
@@ -196,7 +208,8 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         del CART[uid]["last_strain"]
         CART[uid]["state"] = None
         await update.callback_query.message.reply_text(
-            f"🎉 Added {CART[uid]['items'][-1]['strain']} x{qty} to your cart!",
+            f"🎉 Added {escape_markdown_v2(CART[uid]['items'][-1]['strain'])} x{qty} to your cart!",
+            parse_mode=ParseMode.MARKDOWN_V2,
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🛒 View Cart", callback_data="view_cart")],
                 [InlineKeyboardButton("🔙 Back to Menu", callback_data="view_strains")],
@@ -216,18 +229,18 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         if not items:
             await update.callback_query.message.reply_text("🛒 Your cart is empty.")
             return
-        summary = "\n".join(f"{i+1}. {it['strain']} x{it['quantity']}" for i,it in enumerate(items))
+        summary = "\n".join(f"{i+1}. {escape_markdown_v2(it['strain'])} x{it['quantity']}" for i,it in enumerate(items))
         subtotal = calculate_subtotal(items)
         keyboard = []
         for i, it in enumerate(items):
-            keyboard.append([InlineKeyboardButton(f"❌ Remove {it['strain']}", callback_data=f"remove_{i}")])
+            keyboard.append([InlineKeyboardButton(f"❌ Remove {escape_markdown_v2(it['strain'])}", callback_data=f"remove_{i}")])
         keyboard += [
             [InlineKeyboardButton("✅ Finalize Order", callback_data="finalize_order")],
             [InlineKeyboardButton("🔙 Back to Menu", callback_data="view_strains")]
         ]
         await update.callback_query.message.reply_text(
-            f"🛒 <b>Your Cart</b>\n\n{summary}\n\nSubtotal: ${subtotal:.2f} (before shipping/fees)",
-            parse_mode=ParseMode.HTML,
+            f"🛒 *Your Cart*\n\n{summary}\n\nSubtotal: \\${subtotal:.2f} (before shipping/fees)",
+            parse_mode=ParseMode.MARKDOWN_V2,
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
     elif data.startswith("remove_"):
@@ -235,10 +248,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         if idx < len(CART[uid]["items"]):
             del CART[uid]["items"][idx]
         await update.callback_query.message.reply_text("✅ Item removed. Refreshing cart...")
-        dummy_query = update.callback_query
-        dummy_query.data = "view_cart"
-        dummy_update = Update(update.update_id, callback_query=dummy_query)
-        await handle_callback_query(dummy_update, context)
+        await handle_callback_query(update, context)  # Recurse to refresh view_cart
     elif data == "finalize_order":
         if not CART[uid]["items"]:
             await update.callback_query.message.reply_text("🛒 Your cart is empty. Add items first!")
@@ -279,19 +289,19 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         CART[uid]["country"] = country
         CART[uid]["state"] = "await_ig"
         await update.callback_query.message.reply_text("Please enter your Instagram handle (e.g., @username)")
-    elif data == "submit_order":
+    elif data == "confirm_order":
         items = CART[uid]["items"]
-        lines = "\n".join(f"- {it['strain']} x{it['quantity']}" for it in items)
+        lines = "\n".join(f"- {escape_markdown_v2(it['strain'])} x{it['quantity']}" for it in items)
         user = update.effective_user
-        uname = f"@{user.username}" if user.username else user.first_name
+        uname = escape_markdown_v2(f"@{user.username}" if user.username else user.first_name)
         total = calculate_price(items, CART[uid]["country"], CART[uid]["payment_method"])
         order_msg = (
-            f"📦 <b>New Order</b>\n"
+            f"📦 *New Order*\n"
             f"• Telegram: {uname}\n"
-            f"• Instagram: {CART[uid]['ig_handle']}\n"
-            f"• Payment: {CART[uid]['payment_method']}\n"
-            f"• Shipping: {CART[uid]['country']}\n"
-            f"• Total: ${total:.2f}\n"
+            f"• Instagram: {escape_markdown_v2(CART[uid]['ig_handle'])}\n"
+            f"• Payment: {escape_markdown_v2(CART[uid]['payment_method'])}\n"
+            f"• Shipping: {escape_markdown_v2(CART[uid]['country'])}\n"
+            f"• Total: \\${total:.2f}\n"
             f"• Items:\n{lines}"
         )
         log_order(order_msg, status="attempt")
@@ -299,7 +309,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             await context.bot.send_message(
                 chat_id=ADMIN_CHAT_ID,
                 text=order_msg,
-                parse_mode=ParseMode.HTML
+                parse_mode=ParseMode.MARKDOWN_V2
             )
             log_order(order_msg, status="success")
             await update.callback_query.message.reply_text("👍 Order confirmed! We've sent it for processing. We'll reach out shortly.")
