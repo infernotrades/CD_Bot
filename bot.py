@@ -4,7 +4,7 @@ import threading
 from http.server import SimpleHTTPRequestHandler, HTTPServer
 from telegram import Update
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
-from handlers import start_command, handle_text, handle_callback_query, faq
+from handlers import start_command, handle_text, handle_callback_query
 
 # ─── Fly.io health-check listener ──────────────────────────────────────
 def _serve_healthcheck():
