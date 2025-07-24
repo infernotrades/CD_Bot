@@ -1,5 +1,5 @@
 app = "cd-bot"
-primary_region = "sjc"  # Adjust to your actual region (check 'fly status')
+primary_region = "sea"  # Updated from logs (sea region in your output)
 
 kill_signal = "SIGINT"
 kill_timeout = "5s"
@@ -12,7 +12,7 @@ kill_timeout = "5s"
 
 [mounts]
   source = "orders_data"
-  destination = "/data"
+  destination = "/app/data"  # Match logs mount path
 
 [[services]]
   protocol = "tcp"
