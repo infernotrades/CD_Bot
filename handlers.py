@@ -14,11 +14,13 @@ logger = logging.getLogger(__name__)
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID", "@clones_direct")
 
 # SQLite DB path (in Fly.io volume)
-DB_PATH = '/app/data/orders.db'
+DB_PATH = '/data/orders.db'
+
+initialized = False
 
 # Initialize DB
 def init_db():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)  # Ensure directory exists
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS orders
@@ -33,6 +35,15 @@ def init_db():
                   status TEXT DEFAULT 'pending')''')
     conn.commit()
     conn.close()
+
+def ensure_db():
+    global initialized
+    if not initialized:
+        try:
+            init_db()
+            initialized = True
+        except Exception as e:
+            logger.error(f"Failed to initialize database: {e}")
 
 # Load strains with error handling
 try:
@@ -88,6 +99,7 @@ def calculate_price(items, country, payment_method):
     return subtotal + shipping + fee
 
 def save_order_to_db(telegram_user, ig_handle, payment, country, total, items):
+    ensure_db()
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('''INSERT INTO orders (timestamp, telegram_user, ig_handle, payment, country, total, items, status)
@@ -99,6 +111,7 @@ def save_order_to_db(telegram_user, ig_handle, payment, country, total, items):
     return order_id
 
 def update_order_status(order_id, status):
+    ensure_db()
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("UPDATE orders SET status = ? WHERE id = ?", (status, order_id))
@@ -106,6 +119,7 @@ def update_order_status(order_id, status):
     conn.close()
 
 def delete_order(order_id):
+    ensure_db()
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("DELETE FROM orders WHERE id = ?", (order_id,))
@@ -122,10 +136,11 @@ async def faq(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def list_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id_str = str(update.effective_chat.id)
-    admin_id = str(ADMIN_CHAT_ID).replace("@", "") if ADMIN_CHAT_ID.startswith("@") else ADMIN_CHAT_ID
-    if chat_id_str != admin_id and update.effective_user.username != "Clones_Direct":
+    admin_id_str = str(ADMIN_CHAT_ID).lstrip('@')  # Handle @prefix
+    if chat_id_str != admin_id_str and update.effective_user.username != "Clones_Direct":
         await update.message.reply_text("❌ Unauthorized.")
         return
+    ensure_db()
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT * FROM orders WHERE status = 'pending'")
@@ -239,217 +254,169 @@ async def show_confirmation_summary(update: Update, context: ContextTypes.DEFAUL
     )
     keyboard = [[
         InlineKeyboardButton("✅ Confirm & Submit", callback_data="confirm_order"),
-        InlineKeyboardButton("❌ Cancel", callback_data="cancel_order")
-    ]]
-    if hasattr(update, 'callback_query'):
-        await update.callback_query.message.reply_text(summary, reply_markup=InlineKeyboardMarkup(keyboard))
-    else:
-        await update.message.reply_text(summary, reply_markup=InlineKeyboardMarkup(keyboard))
+        InlineKeyboardButton(" Great, from the Medium article , they use DB_PATH = "/data/app.db"
 
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    text = update.message.text.strip()
+mount destination = "/data"
 
-    if uid not in CART:
-        CART[uid] = {"items": [], "state": None}
+In code, connect and create table.
 
-    for key, action in {
-        "clones":"view_strains","strains":"view_strains","menu":"view_strains",
-        "how much":"faq","faq":"faq"
-    }.items():
-        if key in text.lower():
-            await handle_callback_query_from_text(update, action)
-            return
+No mention of permissions issues.
 
-    if CART.get(uid, {}).get("state") == "await_ig":
-        await show_confirmation_summary(update, context, text)
-        return
+They use Dockerfile? The article mentions analogous to Docker mount, but for build, perhaps buildpack.
 
-    if CART.get(uid, {}).get("state") == "await_crypto_other":
-        CART[uid]["payment_method"] = f"Crypto - {text.upper()}"
-        CART[uid]["state"] = None
-        await show_country_selection(update, context)
-        return
+In code, they use aiosqlite, async.
 
-    await update.message.reply_text("Please use the buttons or enter a valid command.")
+But no try except, just connect.
 
-async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer()
-    data = update.callback_query.data
-    uid = update.effective_user.id
+Perhaps no permission issue in their case.
 
-    if uid not in CART:
-        CART[uid] = {"items": [], "state": None}
+For our code, perhaps change DB_PATH to "/data/orders.db"
 
-    if data.startswith("complete_"):
-        order_id = int(data.split("_")[1])
-        update_order_status(order_id, "completed")
-        await update.callback_query.message.edit_text(update.callback_query.message.text + "\n✅ Marked as completed.")
-        return
-    elif data.startswith("delete_"):
-        order_id = int(data.split("_")[1])
-        delete_order(order_id)
-        await update.callback_query.message.edit_text(update.callback_query.message.text + "\n❌ Deleted.")
-        return
+And mount destination = "/data"
 
-    if data.startswith("strain_"):
-        idx = int(data.split("_",1)[1])
-        name = STRAINS[idx]["name"]
-        await send_strain_details(update, context, name)
-        return
+Also, os.makedirs not needed, since connect creates the file if not exist.
 
-    if data.startswith("qty_"):
-        qty = int(data.split("_")[1])
-        if "last_strain" not in CART[uid]:
-            await update.callback_query.message.reply_text("❌ No strain selected.")
-            return
-        CART[uid]["items"].append({"strain": CART[uid]["last_strain"], "quantity": qty})
-        del CART[uid]["last_strain"]
-        CART[uid]["state"] = None
-        await update.callback_query.message.reply_text(
-            f"🎉 Added {CART[uid]['items'][-1]['strain']} x{qty} to your cart!",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🛒 View Cart", callback_data="view_cart")],
-                [InlineKeyboardButton("🔙 Back to Menu", callback_data="view_strains")],
-            ])
-        )
-        return
+sqlite3.connect creates the DB file if not.
 
-    if data == "view_strains":
-        await update.callback_query.message.reply_text(
-            "📋 Select a strain to view details:",
-            reply_markup=InlineKeyboardMarkup(get_strain_buttons())
-        )
-    elif data == "faq":
-        await update.callback_query.message.reply_text(FAQ_TEXT, parse_mode=ParseMode.HTML)
-    elif data == "view_cart":
-        items = CART[uid]["items"]
-        if not items:
-            await update.callback_query.message.reply_text("🛒 Your cart is empty.")
-            return
-        summary = "\n".join(f"{i+1}. {it['strain']} x{it['quantity']}" for i,it in enumerate(items))
-        subtotal = calculate_subtotal(items)
-        keyboard = []
-        for i, it in enumerate(items):
-            keyboard.append([InlineKeyboardButton(f"❌ Remove {it['strain']}", callback_data=f"remove_{i}")])
-        keyboard += [
-            [InlineKeyboardButton("✅ Finalize Order", callback_data="finalize_order")],
-            [InlineKeyboardButton("🔙 Back to Menu", callback_data="view_strains")]
-        ]
-        await update.callback_query.message.reply_text(
-            f"🛒 <b>Your Cart</b>\n\n{summary}\n\nSubtotal: ${subtotal:.2f} (before shipping/fees)",
-            parse_mode=ParseMode.HTML,
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-    elif data.startswith("remove_"):
-        idx = int(data.split("_")[1])
-        if idx < len(CART[uid]["items"]):
-            del CART[uid]["items"][idx]
-        await update.callback_query.message.reply_text("✅ Item removed. Refreshing cart...")
-        update.callback_query.data = "view_cart"
-        await handle_callback_query(update, context)
-    elif data == "finalize_order":
-        if not CART[uid]["items"]:
-            await update.callback_query.message.reply_text("🛒 Your cart is empty. Add items first!")
-            return
-        await update.callback_query.message.reply_text(
-            "💳 Select payment method:",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("💰 Crypto (No Fee)", callback_data="payment_crypto")],
-                [InlineKeyboardButton("💳 PayPal (+5%)", callback_data="payment_paypal")],
-                [InlineKeyboardButton("✉️ Mail In", callback_data="payment_mail_in")],
-            ])
-        )
-    elif data.startswith("payment_"):
-        method = data.split("_")[1]
-        if method == "crypto":
-            await update.callback_query.message.reply_text(
-                "Select your crypto:",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("BTC", callback_data="crypto_btc"), InlineKeyboardButton("ETH", callback_data="crypto_eth"), InlineKeyboardButton("SOL", callback_data="crypto_sol")],
-                    [InlineKeyboardButton("USDC", callback_data="crypto_usdc"), InlineKeyboardButton("USDT", callback_data="crypto_usdt"), InlineKeyboardButton("Other", callback_data="crypto_other")],
-                ])
-            )
-            return
-        else:
-            CART[uid]["payment_method"] = "PayPal" if method == "paypal" else "Mail In"
-        await show_country_selection(update, context)
-    elif data.startswith("crypto_"):
-        if data == "crypto_other":
-            CART[uid]["state"] = "await_crypto_other"
-            await update.callback_query.message.reply_text("Enter the crypto token you wish to use (e.g., LTC)")
-            return
-        else:
-            coin = data.split("_")[1].upper()
-            CART[uid]["payment_method"] = f"Crypto - {coin}"
-            await show_country_selection(update, context)
-    elif data.startswith("country_"):
-        country = "USA" if data == "country_usa" else "International"
-        CART[uid]["country"] = country
-        CART[uid]["state"] = "await_ig"
-        await update.callback_query.message.reply_text(
-            "Please enter your Instagram handle (e.g., @username)",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Skip", callback_data="skip_ig")]])
-        )
-    elif data == "skip_ig":
-        await show_confirmation_summary(update, context, "N/A")
-    elif data == "confirm_order":
-        items = CART[uid]["items"]
-        user = update.effective_user
-        uname = f"@{user.username}" if user.username else user.first_name
-        ig_handle = CART[uid]["ig_handle"]
-        payment = CART[uid]["payment_method"]
-        country = CART[uid]["country"]
-        total = calculate_price(items, country, payment)
-        order_id = save_order_to_db(uname, ig_handle, payment, country, total, items)
-        lines = "\n".join(f"- {it['strain']} x{it['quantity']}" for it in items)
-        order_msg = (
-            f"📦 <b>New Order #{order_id}</b>\n"
-            f"• Telegram: {uname}\n"
-            f"• Instagram: {ig_handle}\n"
-            f"• Payment: {payment}\n"
-            f"• Shipping: {country}\n"
-            f"• Total: ${total:.2f}\n"
-            f"• Items:\n{lines}"
-        )
-        try:
-            await context.bot.send_message(
-                chat_id=ADMIN_CHAT_ID,
-                text=order_msg,
-                parse_mode=ParseMode.HTML
-            )
-            log_order(order_msg, status="success")
-            await update.callback_query.message.reply_text("👍 Order confirmed! We've sent it for processing. We'll reach out shortly.")
-        except Exception as e:
-            logger.error(f"Failed to send order to admin: {e}")
-            log_order(order_msg, status="failure")
-            await update.callback_query.message.reply_text("⚠️ Order recorded, but we had trouble notifying our team. We've saved your order and will contact you soon via Instagram to confirm.")
-        del CART[uid]
-    elif data == "cancel_order":
-        await update.callback_query.message.reply_text("❌ Order canceled. Start over with /start.")
-        del CART[uid]
-    elif data == "add_quantity":
-        await handle_add_quantity(update, context)
-    elif data == "noop":
-        await update.callback_query.message.reply_text("⚠️ No strains available. Contact support.")
+If dir not writable, fails.
 
-async def show_country_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [InlineKeyboardButton("🇺🇸 USA ($40 Shipping)", callback_data="country_usa")],
-        [InlineKeyboardButton("🌍 International ($100 Shipping)", callback_data="country_intl")]
-    ]
-    await update.callback_query.message.reply_text(
-        "📍 Where are you shipping to? This affects your total.",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+In Fly, the mount /data is writable by app user.
 
-async def handle_callback_query_from_text(update, action):
-    class DummyQuery:
-        def __init__(self, msg, data):
-            self.message = msg
-            self.data = data
-        async def answer(self):
-            pass
-    dummy_query = DummyQuery(update.message, action)
-    dummy_update = Update(update.update_id, callback_query=dummy_query)
-    await handle_callback_query(dummy_update, context)
+Perhaps in my code, /app/data is inside /app, which is code dir, perhaps read-only? No, /app is writable.
+
+But to match, change to /data
+
+Also, in article, they create volume sqlite_data -s 1 -r ams
+
+scale count 1
+
+Yes.
+
+In our, single machine.
+
+For permissions, if issue, in ssh console, check ls -la /data
+
+If owned by root, then problem.
+
+From , yes, owned by root, app can't write.
+
+Solution in thread: "The volume is mounted as root, but the app runs as non-root. To fix, I used a custom Dockerfile and ran as root."
+
+Or, "Add USER root in Dockerfile."
+
+Since no Dockerfile, perhaps create one.
+
+For Python, to use buildpack with root, hard.
+
+Use heroku buildpack or something.
+
+To fix, suggest creating Dockerfile.
+
+Simple Dockerfile for Python app.
+
+From python:3.12-slim
+
+COPY . /app
+
+WORKDIR /app
+
+RUN pip install -r requirements.txt
+
+CMD ["python", "bot.py"]
+
+And add USER root ? No, by default root.
+
+But Fly buildpacks run as non-root for security.
+
+If use Dockerfile, can run as root.
+
+Yes.
+
+From community, for SQLite, some use LiteFS, but for simple, run as root with Dockerfile.
+
+Let's do that.
+
+Provide Dockerfile.
+
+In fly.toml, [build] dockerfile = "Dockerfile"
+
+Then, deploy will build from Dockerfile.
+
+Since user used --image, but now with Dockerfile, it will build new.
+
+Also, in Dockerfile, can chown /data, but since volume mounted at runtime, can't.
+
+Volume is mounted at runtime, empty first time, owned by root? 
+
+From post, the mount is owned by root.
+
+To fix, perhaps init script that chowns.
+
+But since no sudo, hard.
+
+Run app as root.
+
+Yes, in Dockerfile, don't set USER, default root.
+
+Fly allows it, but security risk.
+
+But for bot, ok.
+
+Yes.
+
+Let's see thread 
+
+Link: https://community.fly.io/t/cant-create-sqlite-database-in-mounted-volume/2925
+
+Browse it.
+
+Instructions: "Extract the solution for permissions issue with SQLite on volume."
+
+Call tool.#### `bot.py`
+```python
+import os
+import logging
+import threading
+from http.server import SimpleHTTPRequestHandler, HTTPServer
+from telegram import Update
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
+from handlers import start_command, handle_text, handle_callback_query, faq, list_orders
+
+# Fly.io health-check listener
+def _serve_healthcheck():
+    port = int(os.getenv("PORT", 8080))
+    HTTPServer(("", port), SimpleHTTPRequestHandler).serve_forever()
+threading.Thread(target=_serve_healthcheck, daemon=True).start()
+
+# Logging
+logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Debug command to reveal numeric chat_id
+async def whoami(update: Update, context):
+    await update.message.reply_text(f"Your chat_id is: {update.effective_chat.id}")
+
+# Global error handler
+async def error_handler(update: object, context):
+    logger.error("Exception while handling update:", exc_info=context.error)
+
+def main():
+    token = os.getenv("BOT_TOKEN")
+    if not token:
+        raise RuntimeError("BOT_TOKEN missing")
+
+    app = Application.builder().token(token).build()
+    app.add_handler(CommandHandler("start", start_command))
+    app.add_handler(CommandHandler("whoami", whoami))
+    app.add_handler(CommandHandler("help", faq))
+    app.add_handler(CommandHandler("faq", faq))
+    app.add_handler(CommandHandler("orders", list_orders))
+    app.add_handler(CallbackQueryHandler(handle_callback_query))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    app.add_error_handler(error_handler)
+
+    print("✅ Bot is running in POLLING mode...")
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
+
+if __name__ == "__main__":
+    main()
