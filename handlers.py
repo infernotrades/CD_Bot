@@ -1,6 +1,6 @@
 import os
 import json
-import sqlite3
+import re
 import logging
 from datetime import datetime
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -12,28 +12,6 @@ logger = logging.getLogger(__name__)
 
 # Admin chat ID (numeric or @handle) from environment
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID", "@clones_direct")
-
-# SQLite DB path (in Fly.io volume)
-DB_PATH = '/app/data/orders.db'
-
-# Initialize DB
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS orders
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  timestamp TEXT,
-                  telegram_user TEXT,
-                  ig_handle TEXT,
-                  payment TEXT,
-                  country TEXT,
-                  total REAL,
-                  items JSON,
-                  status TEXT DEFAULT 'pending')''')
-    conn.commit()
-    conn.close()
-
-init_db()
 
 # Load & sort strains alphabetically by name
 with open("strains.json", "r") as f:
@@ -53,6 +31,8 @@ Frequently Asked Questions
 • 7-day satisfaction guarantee.
 • 1 free reship allowed (then customer covers shipping).
 • All clones are grown in Oasis root cubes.
+
+For additional help, DM <a href="https://t.me/Clones_Direct">@Clones_Direct</a>
 """
 
 PRICING_TEXT = """
@@ -79,64 +59,14 @@ def calculate_price(items, country, payment_method):
     fee = 0.05 * (subtotal + shipping) if "PayPal" in payment_method else 0
     return subtotal + shipping + fee
 
-def save_order_to_db(telegram_user, ig_handle, payment, country, total, items):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('''INSERT INTO orders (timestamp, telegram_user, ig_handle, payment, country, total, items, status)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
-              (datetime.now().isoformat(), telegram_user, ig_handle, payment, country, total, json.dumps(items), 'pending'))
-    conn.commit()
-    order_id = c.lastrowid
-    conn.close()
-    return order_id
+def log_order(order_msg, status="success"):
+    """Log order to a file with timestamp and status."""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open("orders.log", "a") as f:
+        f.write(f"[{timestamp}] {status.upper()}\n{order_msg}\n{'-'*50}\n")
 
-def update_order_status(order_id, status):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("UPDATE orders SET status = ? WHERE id = ?", (status, order_id))
-    conn.commit()
-    conn.close()
-
-def delete_order(order_id):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("DELETE FROM orders WHERE id = ?", (order_id,))
-    conn.commit()
-    conn.close()
-
-async def list_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_chat.id) != ADMIN_CHAT_ID:
-        await update.message.reply_text("❌ Access denied. This command is for admins only.")
-        return
-
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT id, timestamp, telegram_user, ig_handle, payment, country, total, items FROM orders WHERE status = 'pending'")
-    orders = c.fetchall()
-    conn.close()
-
-    if not orders:
-        await update.message.reply_text("No pending orders.")
-        return
-
-    for order in orders:
-        order_id, timestamp, telegram_user, ig_handle, payment, country, total, items_json = order
-        items = json.loads(items_json)
-        lines = "\n".join(f"{it['strain']} x{it['quantity']}" for it in items)
-        summary = (
-            f"Order #{order_id} ({timestamp})\n"
-            f"Telegram: {telegram_user}\n"
-            f"Instagram: {ig_handle}\n"
-            f"Payment: {payment}\n"
-            f"Shipping: {country}\n"
-            f"Total: ${total:.2f}\n"
-            f"Items: {lines}"
-        )
-        keyboard = [[
-            InlineKeyboardButton("Mark Completed", callback_data=f"complete_order_{order_id}"),
-            InlineKeyboardButton("Delete Order", callback_data=f"delete_order_{order_id}")
-        ]]
-        await update.message.reply_text(summary, reply_markup=InlineKeyboardMarkup(keyboard))
+async def faq(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(FAQ_TEXT, parse_mode=ParseMode.HTML)
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -354,38 +284,8 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             coin = data.split("_")[1].upper()
             CART[uid]["payment_method"] = f"Crypto - {coin}"
             await show_country_selection(update, context)
-    elif data.startswith("country_"):
-        country = "USA" if data == "country_usa" else "International"
-        CART[uid]["country"] = country
-        CART[uid]["state"] = "await_ig"
-        await update.callback_query.message.reply_text("Please enter your Instagram handle (e.g., @username)")
     elif data == "confirm_order":
-        items = CART[uid]["items"]
-        lines = "\n".join(f"- {escape_markdown_v2(it['strain'])} x{it['quantity']}" for it in items)
-        user = update.effective_user
-        uname = escape_markdown_v2(f"@{user.username}" if user.username else user.first_name)
-        total = calculate_price(items, CART[uid]["country"], CART[uid]["payment_method"])
-        order_msg = (
-            f"📦 *New Order*\n"
-            f"• Telegram: {uname}\n"
-            f"• Instagram: {escape_markdown_v2(CART[uid]['ig_handle'])}\n"
-            f"• Payment: {escape_markdown_v2(CART[uid]['payment_method'])}\n"
-            f"• Shipping: {escape_markdown_v2(CART[uid]['country'])}\n"
-            f"• Total: \\${total:.2f}\n"
-            f"• Items:\n{lines}"
-        )
-        log_order(order_msg, status="attempt")
-        try:
-            await context.bot.send_message(
-                chat_id=ADMIN_CHAT_ID,
-                text=order_msg,
-                parse_mode=ParseMode.MARKDOWN_V2
-            )
-            log_order(order_msg, status="success")
-            await update.callback_query.message.reply_text("👍 Order confirmed! We've sent it for processing. We'll reach out shortly.")
-        except Exception as e:
-            logger.error(f"Failed to send order to admin: {e}")
-            await update.callback_query.message.reply_text("⚠️ Order recorded, but we had trouble notifying our team. We've saved your order and will contact you soon via Instagram to confirm.")
+        await update.callback_query.message.reply_text("✅ Order confirmed! We've sent it for processing. We'll reach out shortly.")
         del CART[uid]
     elif data == "cancel_order":
         await update.callback_query.message.reply_text("❌ Order canceled. Start over with /start.")
